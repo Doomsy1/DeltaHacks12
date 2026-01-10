@@ -1,70 +1,50 @@
-# JobReels Frontend
+# Welcome to your Expo app 👋
 
-Minimal Expo React Native app that displays health status for backend services.
+This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
-## Setup
+## Get started
 
-1. **Install dependencies:**
+1. Install dependencies
+
    ```bash
    npm install
    ```
 
-2. **Configure service URLs:**
-   
-   Edit `src/config.js` and update the base URLs:
+2. Start the app
 
-   **For local development:**
-   - Use your laptop's local IP address (not `localhost`)
-   - Find your IP: 
-     - macOS/Linux: `ifconfig` or `ip addr`
-     - Windows: `ipconfig`
-   - Example: `http://192.168.1.100:8000`
-
-   **For production (Vultr):**
-   - Use your Vultr server's public IP
-   - Example: `http://YOUR_VULTR_IP:8000`
-   - For headless/video, use the same IP (they're exposed in dev mode)
-
-   **For Tailscale:**
-   - Use Tailscale DNS names if services are accessed via Tailscale
-   - Example: `http://vultr-node:8000`
-
-3. **Start Expo:**
    ```bash
-   npx expo start --tunnel
+   npx expo start
    ```
 
-   The `--tunnel` flag allows you to test on a physical device even when your laptop and phone are on different networks.
+In the output, you'll find options to open the app in a
 
-4. **Test with Expo Go:**
-   - Install Expo Go app on your phone (iOS or Android)
-   - Scan the QR code displayed in the terminal
-   - The app will load and display health status for all services
+- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
+- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
+- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
+- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
 
-## Usage
+You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
-- **Refresh Button**: Tap to check health status of all three services (backend, headless, video)
-- **Status Indicators**: 
-  - Green dot = Service is healthy (`{"status":"ok"}`)
-  - Red dot = Connection error or service unavailable
-  - Gray = Not checked yet
+## Get a fresh project
 
-## Development
+When you're ready, run:
 
-- **Entry point**: `App.js`
-- **Configuration**: `src/config.js`
-- **Test locally**: Make sure services are running (`docker compose up`) and use your laptop's IP in config
-- **Test production**: Update config to point at your Vultr IP
+```bash
+npm run reset-project
+```
 
-## Troubleshooting
+This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
 
-**Can't connect to services:**
-- Verify services are running: `docker compose ps`
-- Check your IP address is correct in `src/config.js`
-- Ensure you're using your local IP (not `localhost` or `127.0.0.1`) when testing on a physical device
-- If using tunnel mode, ensure ports 8000-8002 are accessible from your network
+## Learn more
 
-**Expo Go can't load app:**
-- Make sure you're using `--tunnel` flag
-- Check your phone and laptop are connected to internet
-- Try restarting Expo: `npx expo start --clear --tunnel`
+To learn more about developing your project with Expo, look at the following resources:
+
+- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
+- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+
+## Join the community
+
+Join our community of developers creating universal apps.
+
+- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
+- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
