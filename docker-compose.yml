@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_DB=${MONGODB_DB}
+
+  headless:
+    build:
+      context: ./services/headless
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_DB=${MONGODB_DB}
+
+  video:
+    build:
+      context: ./services/video
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    environment:
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_DB=${MONGODB_DB}
