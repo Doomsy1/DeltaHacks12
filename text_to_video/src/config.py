@@ -138,7 +138,7 @@ CHARACTERS = {
         "name": "Barack Obama",
         "voice_id": "4ce7e917cedd4bc2bb2e6ff3a46acaa1",
         "role": "candidate",
-        "caption_color": "#1E90FF",  # Dodger Blue
+        "caption_color": "#9B7652",  # Brown
         "caption_style": "normal"
     },
     "peter": {
@@ -152,7 +152,7 @@ CHARACTERS = {
         "name": "Brian Griffin",
         "voice_id": "df7b23b4d67c4340be1170ae6cbc2913",
         "role": "candidate",
-        "caption_color": "#9370DB",  # Medium Purple
+        "caption_color": "#F7F7F7",  # White
         "caption_style": "normal"
     },
     "spongebob": {
