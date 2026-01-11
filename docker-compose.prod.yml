@@ -49,13 +49,15 @@ services:
     environment:
       - MONGODB_URI=${MONGODB_URI}
       - MONGODB_DB=${MONGODB_DB}
-      - VULTR_ENDPOINT=${VULTR_ENDPOINT:-}
-      - VULTR_ACCESS_KEY=${VULTR_ACCESS_KEY:-}
-      - VULTR_SECRET_KEY=${VULTR_SECRET_KEY:-}
-      - VULTR_BUCKET=${VULTR_BUCKET:-}
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
-      - PRESIGNED_URL_EXPIRY=${PRESIGNED_URL_EXPIRY:-3600}
       - MAX_FILE_SIZE=${MAX_FILE_SIZE:-524288000}
+      # DigitalOcean Spaces CDN - direct public URLs, no presigning needed
+      - DO_SPACES_CDN_URL=${DO_SPACES_CDN_URL:-https://deltahacks-videos.tor1.cdn.digitaloceanspaces.com}
+      - DO_SPACES_ENDPOINT=${DO_SPACES_ENDPOINT:-https://tor1.digitaloceanspaces.com}
+      - DO_SPACES_ACCESS_KEY=${DO_SPACES_ACCESS_KEY:-}
+      - DO_SPACES_SECRET_KEY=${DO_SPACES_SECRET_KEY:-}
+      - DO_SPACES_BUCKET=${DO_SPACES_BUCKET:-deltahacks-videos}
+      - DO_SPACES_REGION=${DO_SPACES_REGION:-tor1}
     restart: unless-stopped
 
   # Optional Tailscale service - uncomment and set TS_AUTHKEY to use
