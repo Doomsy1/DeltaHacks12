@@ -3,3 +3,4 @@ uvicorn[standard]
 motor
 pymongo
 boto3
+google-generativeai

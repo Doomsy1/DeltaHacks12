@@ -17,6 +17,7 @@ services:
       - VULTR_SECRET_KEY=${VULTR_SECRET_KEY:-}
       - VULTR_BUCKET=${VULTR_BUCKET:-}
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
 
   headless:
     build:
