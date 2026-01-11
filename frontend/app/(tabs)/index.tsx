@@ -19,6 +19,7 @@ import {
 import { VideoView, useVideoPlayer } from "expo-video";
 import { Audio } from "expo-av";
 import { ReelOverlay } from "../../components/ReelOverlay";
+import { OTPInputModal } from "../../components/OTPInputModal";
 import { Ionicons } from "@expo/vector-icons";
 import Config from "../../config";
 
@@ -353,6 +354,10 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // State for email verification OTP modal
+  const [showOTPModal, setShowOTPModal] = useState(false);
+  const [otpCode, setOtpCode] = useState<string | null>(null);
+
   const prefetchedManifests = useRef<Set<string>>(new Set());
 
   // ✅ If feed is disabled, NEVER prefetch anything
@@ -603,6 +608,22 @@ export default function HomeScreen() {
               pauseOverride={pauseOverride}
             />
           );
+        }}
+      />
+
+      {/* OTP Input Modal - shows on top of everything when email verification is required */}
+      <OTPInputModal
+        visible={showOTPModal}
+        onCodeSubmit={(code) => {
+          console.log("OTP Code submitted:", code);
+          setOtpCode(code);
+          setShowOTPModal(false);
+          // TODO: Pass the code to the application submission flow
+          // This code should be passed to the backend API when resuming the job application
+        }}
+        onCancel={() => {
+          setShowOTPModal(false);
+          setOtpCode(null);
         }}
       />
     </View>
