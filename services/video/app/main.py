@@ -305,7 +305,7 @@ async def get_video(video_id: str):
     title = "Video Title"
     description = "Video description"
     
-    if jobs_collection:
+    if jobs_collection is not None:
         try:
             # Try both int and string versions of greenhouse_id
             job_query = {"greenhouse_id": vid_int} if vid_int else {"greenhouse_id": video_id}
