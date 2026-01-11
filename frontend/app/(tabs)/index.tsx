@@ -16,8 +16,7 @@ import {
 } from "react-native";
 
 import { videos, videos2, videos3 } from "../../assets/data";
-import { Video, ResizeMode, AVPlaybackNativeSource } from "expo-av";
-// import Video, { ResizeMode, VideoRef } from "react-native-video";
+import { VideoView, useVideoPlayer } from "expo-video";
 import { ReelOverlay } from "../../components/ReelOverlay";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -43,7 +42,10 @@ const VideoWrapper = ({
   const bottomHeight = useBottomTabBarHeight();
   const { index, item } = data;
 
-  const videoRef = useRef<Video | null>(null);
+  const player = useVideoPlayer(allVideos[index], (player) => {
+    player.loop = true;
+    player.muted = false;
+  });
 
   // State for like/dislike
   const [isLiked, setIsLiked] = useState(false);
@@ -79,15 +81,21 @@ const VideoWrapper = ({
     }
   };
 
+  // Control playback based on visibility and pause override
+  useEffect(() => {
+    if (visibleIndex === index && !pauseOverride) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [visibleIndex, index, pauseOverride, player]);
+
   // Reset video to 0:00 when scrolling away from it
   useEffect(() => {
-    if (visibleIndex !== index && videoRef.current) {
-      // Only reset if the ref is valid
-      videoRef.current.setPositionAsync(0).catch(() => {
-        // Ignore errors if component is unmounted
-      });
+    if (visibleIndex !== index) {
+      player.currentTime = 0;
     }
-  }, [visibleIndex, index]);
+  }, [visibleIndex, index, player]);
 
   return (
     <View
@@ -96,13 +104,11 @@ const VideoWrapper = ({
         width,
       }}
     >
-      <Video
-        ref={videoRef}
-        source={{ uri: allVideos[index] }}
+      <VideoView
+        player={player}
         style={{ height: height - bottomHeight, width }}
-        resizeMode={ResizeMode.COVER}
-        shouldPlay={visibleIndex === index && !pauseOverride}
-        isLooping
+        contentFit="cover"
+        nativeControls={false}
       />
 
       <Pressable onPress={pause} style={$tapOverlay} />
