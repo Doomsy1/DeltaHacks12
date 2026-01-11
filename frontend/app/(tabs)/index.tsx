@@ -23,6 +23,7 @@ import { OTPInputModal } from "../../components/OTPInputModal";
 import { Ionicons } from "@expo/vector-icons";
 import Config from "../../config";
 import { useAuth } from "@/contexts/AuthContext";
+import { useApplied } from "@/contexts/AppliedContext";
 
 const { height, width } = Dimensions.get("window");
 
@@ -230,6 +231,8 @@ interface VideoWrapperProps {
   share: (videoURL: string) => void;
   pauseOverride: boolean;
   user: { user_id: string } | null;
+  setPendingApplicationId: (id: string | null) => void;
+  setShowOTPModal: (show: boolean) => void;
 }
 
 const VideoWrapper = ({
@@ -240,9 +243,12 @@ const VideoWrapper = ({
   pauseOverride,
   share,
   user,
+  setPendingApplicationId,
+  setShowOTPModal,
 }: VideoWrapperProps) => {
   const bottomHeight = useBottomTabBarHeight();
   const { index, item } = data;
+  const { incrementApplied } = useApplied();
 
   // Track if this video should be playing
   const shouldPlay = visibleIndex === index && !pauseOverride;
@@ -278,6 +284,9 @@ const VideoWrapper = ({
       setIsDisliked(false);
       setDislikeCount(dislikeCount - 1);
     }
+
+    // Increment applied count when user upvotes a reel
+    incrementApplied();
 
     // Call submit_application when user upvotes (fire-and-forget - don't await)
     // This is a long-running operation that can take several minutes, so we
@@ -807,6 +816,8 @@ export default function HomeScreen() {
               share={share}
               pauseOverride={pauseOverride}
               user={user}
+              setPendingApplicationId={setPendingApplicationId}
+              setShowOTPModal={setShowOTPModal}
             />
           );
         }}
@@ -815,7 +826,7 @@ export default function HomeScreen() {
       {/* OTP Input Modal - shows on top of everything when email verification is required */}
       <OTPInputModal
         visible={showOTPModal}
-        onCodeSubmit={async (code) => {
+        onCodeSubmit={async (code: string) => {
           console.log("OTP Code submitted:", code);
           setOtpCode(code);
 

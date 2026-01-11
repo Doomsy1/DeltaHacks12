@@ -42,7 +42,7 @@ export const OTPInputModal: React.FC<OTPInputModalProps> = ({
   }, [visible]);
 
   const handleSubmit = () => {
-    if (code.length === 8) {
+    if (code.length === 8 && /^[A-Z]{8}$/.test(code)) {
       onCodeSubmit(code);
       setCode('');
     }
@@ -73,7 +73,7 @@ export const OTPInputModal: React.FC<OTPInputModalProps> = ({
           {/* Title */}
           <Text style={styles.title}>Email Verification Required</Text>
           <Text style={styles.subtitle}>
-            Please enter the 8-digit code sent to your email
+            Please enter the 8-letter code sent to your email
           </Text>
 
           {/* OTP Input */}
@@ -83,21 +83,23 @@ export const OTPInputModal: React.FC<OTPInputModalProps> = ({
               style={styles.input}
               value={code}
               onChangeText={(text) => {
-                // Only allow digits, max 8 characters
-                const digitsOnly = text.replace(/[^0-9]/g, '');
-                if (digitsOnly.length <= 8) {
-                  setCode(digitsOnly);
+                // Only allow letters (uppercase), max 8 characters
+                const lettersOnly = text.replace(/[^A-Za-z]/g, '').toUpperCase();
+                if (lettersOnly.length <= 8) {
+                  setCode(lettersOnly);
                 }
               }}
-              placeholder="00000000"
+              placeholder="ABCDEFGH"
               placeholderTextColor="rgba(255, 255, 255, 0.3)"
-              keyboardType="number-pad"
+              keyboardType="default"
+              autoCapitalize="characters"
+              autoCorrect={false}
               maxLength={8}
               selectTextOnFocus
               autoFocus
             />
             <Text style={styles.inputHint}>
-              {code.length}/8 digits
+              {code.length}/8 letters
             </Text>
           </View>
 
@@ -105,15 +107,15 @@ export const OTPInputModal: React.FC<OTPInputModalProps> = ({
           <Pressable
             style={[
               styles.submitButton,
-              code.length === 8 && styles.submitButtonActive,
+              code.length === 8 && /^[A-Z]{8}$/.test(code) && styles.submitButtonActive,
             ]}
             onPress={handleSubmit}
-            disabled={code.length !== 8}
+            disabled={code.length !== 8 || !/^[A-Z]{8}$/.test(code)}
           >
             <Text
               style={[
                 styles.submitButtonText,
-                code.length !== 8 && styles.submitButtonTextDisabled,
+                (code.length !== 8 || !/^[A-Z]{8}$/.test(code)) && styles.submitButtonTextDisabled,
               ]}
             >
               Verify
@@ -193,9 +195,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     letterSpacing: 8,
     paddingHorizontal: 20,
+    textTransform: 'uppercase',
     ...Platform.select({
       ios: {
-        fontVariant: ['tabular-nums'],
+        fontVariant: [],
       },
       android: {
         fontFamily: 'monospace',
