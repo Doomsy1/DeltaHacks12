@@ -89,7 +89,9 @@ fi
 
 # Build and start services
 echo "Building and starting services..."
-docker compose -f docker-compose.prod.yml up -d --build
+echo "⚠️  Building without cache to ensure latest code is used..."
+docker compose -f docker-compose.prod.yml build --no-cache
+docker compose -f docker-compose.prod.yml up -d
 
 echo ""
 echo "=== Deployment complete! ==="
