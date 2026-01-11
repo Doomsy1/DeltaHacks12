@@ -967,13 +967,22 @@ async def search_jobs(request: SearchJobsRequest):
             {"greenhouse_id": 1, "_id": 0}
         )
         seen_greenhouse_ids = []
+        seen_greenhouse_ids_as_ints = []
         async for doc in seen_cursor:
-            seen_greenhouse_ids.append(str(doc["greenhouse_id"]))
+            gh_id = doc["greenhouse_id"]
+            seen_greenhouse_ids.append(str(gh_id))
+            # Also store as int for MongoDB filter (jobs collection uses int)
+            try:
+                seen_greenhouse_ids_as_ints.append(int(gh_id))
+            except (ValueError, TypeError):
+                pass
         
         # Step 3: Vector search for top K jobs (more than TARGET_COUNT to allow filtering)
+        print(f"  User has seen {len(seen_greenhouse_ids_as_ints)} jobs: {seen_greenhouse_ids_as_ints[:10]}")  # Debug
         vector_search_filter = {"active": True}
-        if seen_greenhouse_ids:
-            vector_search_filter["greenhouse_id"] = {"$nin": seen_greenhouse_ids}
+        if seen_greenhouse_ids_as_ints:
+            # Use int version for filter since jobs collection stores greenhouse_id as int
+            vector_search_filter["greenhouse_id"] = {"$nin": seen_greenhouse_ids_as_ints}
         
         pipeline = [
             {
@@ -1018,8 +1027,8 @@ async def search_jobs(request: SearchJobsRequest):
             
             # Fallback to non-vector search
             fallback_filter = {"active": True}
-            if seen_greenhouse_ids:
-                fallback_filter["greenhouse_id"] = {"$nin": seen_greenhouse_ids}
+            if seen_greenhouse_ids_as_ints:
+                fallback_filter["greenhouse_id"] = {"$nin": seen_greenhouse_ids_as_ints}
             
             cursor = jobs_collection.find(
                 fallback_filter,
@@ -1035,14 +1044,57 @@ async def search_jobs(request: SearchJobsRequest):
                     })
         
         if not job_results:
-            print("  No jobs found")
-            return SearchJobsResponse(
-                user_id=request.user_id,
-                greenhouse_ids=[],
-                count=0,
-                generation_triggered=False,
-                generation_job_ids=[]
-            )
+            # If no results found but user has seen videos, reset their seen list and retry
+            if seen_greenhouse_ids:
+                print(f"  No unseen jobs found, but user has seen {len(seen_greenhouse_ids)} jobs. Resetting seen list...")
+                await user_job_views_collection.delete_many({"user_id": request.user_id})
+                
+                # Retry the vector search without filtering seen jobs
+                pipeline = [
+                    {
+                        "$vectorSearch": {
+                            "index": "vector_index",
+                            "path": "embedding",
+                            "queryVector": query_vector,
+                            "numCandidates": VECTOR_SEARCH_CANDIDATES,
+                            "limit": VECTOR_SEARCH_LIMIT,
+                            "filter": {"active": True}  # No seen filter this time
+                        }
+                    },
+                    {
+                        "$addFields": {
+                            "score": {"$meta": "vectorSearchScore"}
+                        }
+                    },
+                    {
+                        "$project": {
+                            "greenhouse_id": 1,
+                            "score": 1,
+                            "description": 1,
+                            "_id": 0
+                        }
+                    }
+                ]
+                
+                job_results = []
+                async for doc in jobs_collection.aggregate(pipeline):
+                    if doc.get("greenhouse_id"):
+                        job_results.append({
+                            "greenhouse_id": doc["greenhouse_id"],
+                            "score": doc.get("score", 0),
+                            "description": doc.get("description", "")
+                        })
+                print(f"  After reset: found {len(job_results)} jobs")
+            
+            if not job_results:
+                print("  No jobs found even after reset")
+                return SearchJobsResponse(
+                    user_id=request.user_id,
+                    greenhouse_ids=[],
+                    count=0,
+                    generation_triggered=False,
+                    generation_job_ids=[]
+                )
         
         # Step 4: Check which jobs have videos (video_id = greenhouse_id)
         greenhouse_ids = [j["greenhouse_id"] for j in job_results]
@@ -1055,6 +1107,7 @@ async def search_jobs(request: SearchJobsRequest):
             jobs_with_videos.add(doc["video_id"])  # video_id = greenhouse_id
         
         print(f"  {len(jobs_with_videos)} jobs have videos out of {len(job_results)} searched")
+        print(f"  Jobs with videos: {list(jobs_with_videos)}")
         
         # Step 5: Split into categories
         jobs_with_videos_above_threshold = []
@@ -1078,12 +1131,55 @@ async def search_jobs(request: SearchJobsRequest):
         print(f"  Below threshold with videos: {len(jobs_with_videos_below_threshold)}")
         print(f"  Above threshold without videos: {len(jobs_without_videos_above_threshold)}")
         
+        # Combine available videos: above threshold first, then below threshold
+        available_with_videos = jobs_with_videos_above_threshold + jobs_with_videos_below_threshold
+        
+        # Step 5.5: Reset if no videos available but user has seen videos
+        if len(available_with_videos) == 0 and len(seen_greenhouse_ids_as_ints) > 0:
+            print(f"  No videos available but user has seen {len(seen_greenhouse_ids_as_ints)} jobs. Resetting...")
+            await user_job_views_collection.delete_many({"user_id": request.user_id})
+            
+            # Get ALL available videos (not just from current search results)
+            all_videos_cursor = videos_collection.find(
+                {"status": "ready"},
+                {"video_id": 1, "_id": 0}
+            ).limit(TARGET_COUNT)
+            
+            all_available_video_ids = []
+            async for doc in all_videos_cursor:
+                all_available_video_ids.append(doc["video_id"])
+            
+            print(f"  After reset: {len(all_available_video_ids)} total videos available")
+            
+            # Return these videos directly (they're below threshold but better than nothing)
+            results_to_return = [str(vid) for vid in all_available_video_ids[:TARGET_COUNT]]
+            
+            # Mark them as seen immediately
+            for greenhouse_id in results_to_return:
+                try:
+                    gh_id_to_store = int(greenhouse_id)
+                except (ValueError, TypeError):
+                    gh_id_to_store = greenhouse_id
+                
+                await user_job_views_collection.update_one(
+                    {"user_id": request.user_id, "greenhouse_id": gh_id_to_store},
+                    {"$set": {"seen": True}},
+                    upsert=True
+                )
+            
+            print(f"  Returning {len(results_to_return)} videos after reset")
+            
+            return SearchJobsResponse(
+                user_id=request.user_id,
+                greenhouse_ids=results_to_return,
+                count=len(results_to_return),
+                generation_triggered=False,
+                generation_job_ids=[]
+            )
+        
         # Step 6: Determine what to return and whether to trigger generation
         generation_triggered = False
         generation_job_ids = []
-        
-        # Combine available videos: above threshold first, then below threshold
-        available_with_videos = jobs_with_videos_above_threshold + jobs_with_videos_below_threshold
         
         # If we have enough above threshold, no generation needed
         if len(jobs_with_videos_above_threshold) >= TARGET_COUNT:
@@ -1117,8 +1213,14 @@ async def search_jobs(request: SearchJobsRequest):
         
         # Step 7: Mark the returned jobs as seen
         for greenhouse_id in results_to_return:
+            # Store as int to match jobs collection type
+            try:
+                gh_id_to_store = int(greenhouse_id)
+            except (ValueError, TypeError):
+                gh_id_to_store = greenhouse_id
+            
             await user_job_views_collection.update_one(
-                {"user_id": request.user_id, "greenhouse_id": greenhouse_id},
+                {"user_id": request.user_id, "greenhouse_id": gh_id_to_store},
                 {"$set": {"seen": True}},
                 upsert=True
             )
