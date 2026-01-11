@@ -1,0 +1,4 @@
+This is a dummy resume for testing purposes.
+John Doe
+Software Engineer
+Skills: Python, Playwright, Automation

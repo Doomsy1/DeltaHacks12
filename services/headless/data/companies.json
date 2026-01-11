@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Reddit",
+    "token": "reddit",
+    "job_count": 145,
+    "api_url": "https://boards-api.greenhouse.io/v1/boards/reddit/jobs",
+    "public_url": "https://boards.greenhouse.io/reddit"
+  },
+  {
+    "name": "Discord",
+    "token": "discord",
+    "job_count": 62,
+    "api_url": "https://boards-api.greenhouse.io/v1/boards/discord/jobs",
+    "public_url": "https://boards.greenhouse.io/discord"
+  }
+]

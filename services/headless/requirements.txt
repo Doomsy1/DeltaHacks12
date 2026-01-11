@@ -2,3 +2,9 @@ fastapi
 uvicorn[standard]
 motor
 pymongo
+playwright
+httpx
+apscheduler
+python-dotenv
+google-genai
+beautifulsoup4
