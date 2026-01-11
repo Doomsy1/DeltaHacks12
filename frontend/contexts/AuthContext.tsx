@@ -80,7 +80,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       setToken(data.access_token);
       setUser(userData);
-    } catch (error) {
+    } catch (error: any) {
+      // Handle network errors with a user-friendly message
+      if (error?.message === 'Network request failed' || error?.name === 'TypeError') {
+        // Use console.warn for expected network failures (backend not running)
+        console.warn('Login: Network request failed - backend may not be running');
+        throw new Error('Cannot connect to server. Please check your connection and ensure the backend is running.');
+      }
       console.error('Login error:', error);
       throw error;
     }
@@ -113,7 +119,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       setToken(data.access_token);
       setUser(userData);
-    } catch (error) {
+    } catch (error: any) {
+      // Handle network errors with a user-friendly message
+      if (error?.message === 'Network request failed' || error?.name === 'TypeError') {
+        // Use console.warn for expected network failures (backend not running)
+        console.warn('Registration: Network request failed - backend may not be running');
+        throw new Error('Cannot connect to server. Please check your connection and ensure the backend is running.');
+      }
       console.error('Registration error:', error);
       throw error;
     }

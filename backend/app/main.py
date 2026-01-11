@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Query, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError, DuplicateKeyError
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError, DuplicateKeyError, OperationFailure
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 import boto3
@@ -113,18 +113,58 @@ async def startup_db_client():
             
             # Initialize users collection and create unique index on email
             users_collection = db.users
-            await users_collection.create_index([("email", 1)], unique=True, name="email_unique_idx")
-            print("✓ users collection initialized with index")
+            try:
+                await users_collection.create_index([("email", 1)], unique=True, name="email_unique_idx")
+                print("✓ users collection initialized with index")
+            except OperationFailure as e:
+                # Index already exists with a different name - check if it's the same index
+                if "Index already exists" in str(e) or "IndexOptionsConflict" in str(e):
+                    # Check if there's already a unique index on email
+                    existing_indexes = await users_collection.list_indexes().to_list(length=10)
+                    email_index_exists = any(
+                        idx.get("key", {}).get("email") == 1 and idx.get("unique") is True
+                        for idx in existing_indexes
+                    )
+                    if email_index_exists:
+                        print("✓ users collection already has unique email index")
+                    else:
+                        # Drop old index and create new one
+                        try:
+                            await users_collection.drop_index("email_1")
+                            await users_collection.create_index([("email", 1)], unique=True, name="email_unique_idx")
+                            print("✓ users collection index updated")
+                        except Exception as drop_error:
+                            print(f"⚠ Could not update email index: {drop_error}")
+                            print("  Index exists but may have different name - continuing anyway")
+                else:
+                    raise
             
             # Initialize user_job_views collection and create index
             user_job_views_collection = db.user_job_views
             # Create compound index on (user_id, greenhouse_id) for fast lookups
-            await user_job_views_collection.create_index(
-                [("user_id", 1), ("greenhouse_id", 1)],
-                unique=True,
-                name="user_greenhouse_unique_idx"
-            )
-            print("✓ user_job_views collection initialized with index")
+            try:
+                await user_job_views_collection.create_index(
+                    [("user_id", 1), ("greenhouse_id", 1)],
+                    unique=True,
+                    name="user_greenhouse_unique_idx"
+                )
+                print("✓ user_job_views collection initialized with index")
+            except OperationFailure as e:
+                # Index already exists - check if it's the same index
+                if "Index already exists" in str(e) or "IndexOptionsConflict" in str(e):
+                    existing_indexes = await user_job_views_collection.list_indexes().to_list(length=10)
+                    compound_index_exists = any(
+                        idx.get("key", {}).get("user_id") == 1 and 
+                        idx.get("key", {}).get("greenhouse_id") == 1 and
+                        idx.get("unique") is True
+                        for idx in existing_indexes
+                    )
+                    if compound_index_exists:
+                        print("✓ user_job_views collection already has compound index")
+                    else:
+                        print(f"⚠ Index conflict in user_job_views: {e}")
+                else:
+                    raise
             
             # Initialize jobs collection
             jobs_collection = db.jobs
