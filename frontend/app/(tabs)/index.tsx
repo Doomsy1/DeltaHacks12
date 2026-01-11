@@ -342,7 +342,17 @@ const VideoWrapper = ({
   // Control playback based on visibility and pause override
   useEffect(() => {
     if (visibleIndex === index && !pauseOverride) {
-      player.play();
+      // Delay play slightly to ensure player is initialized
+      const timeoutId = setTimeout(() => {
+        try {
+          if (!player.playing) {
+            player.play();
+          }
+        } catch (error) {
+          console.warn(`[Video ${index}] Play error:`, error);
+        }
+      }, 100);
+      return () => clearTimeout(timeoutId);
     } else {
       player.pause();
     }
