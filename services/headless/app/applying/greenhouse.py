@@ -818,6 +818,52 @@ class GreenhouseApplier:
             print(f"AI error for field {field['label']}: {e}")
             field["confidence"] = 0.0
 
+    async def _fill_file_field(self, page: Page, selector: str, file_path: str):
+        """Upload a file to a file input field."""
+        import os
+        from pathlib import Path
+        
+        # HARDCODED PATH for Windows testing
+        hardcoded_path = r"C:\Desktop\Repos\DeltaHacks12\services\headless\data\resumes\thomasariogpt_gmail_com\resume.pdf"
+        
+        # Use hardcoded path if it exists, otherwise try the provided path
+        if os.path.exists(hardcoded_path):
+            actual_path = hardcoded_path
+            print(f"Using hardcoded resume path: {actual_path}")
+        elif file_path and os.path.exists(file_path):
+            actual_path = file_path
+            print(f"Using provided resume path: {actual_path}")
+        else:
+            print(f"File not found: {file_path}")
+            return
+        
+        try:
+            # Try Greenhouse-specific selectors first
+            # The resume input is typically id="resume" but visually hidden
+            file_input = page.locator("#resume").first
+            
+            if await file_input.count() == 0:
+                # Try cover_letter
+                file_input = page.locator("#cover_letter").first
+            
+            if await file_input.count() == 0:
+                # Try the provided selector
+                file_input = page.locator(selector).first
+            
+            if await file_input.count() == 0:
+                # Generic fallback
+                file_input = page.locator("input[type='file']").first
+            
+            if await file_input.count() > 0:
+                await file_input.set_input_files(actual_path)
+                print(f"✓ Resume uploaded successfully: {Path(actual_path).name}")
+                await page.wait_for_timeout(1000)  # Wait for upload to process
+            else:
+                print(f"File input not found with selector: {selector}")
+        except Exception as e:
+            print(f"Error uploading file: {e}")
+
+
     async def _fill_form_fields(self, page: Page, fields: list[dict[str, Any]], user_profile: dict[str, Any] | None = None):
         """Fill all form fields with their final values."""
         
@@ -876,6 +922,15 @@ class GreenhouseApplier:
 
             try:
                 if field_type == "file":
+                    # Fix: If AI returned a placeholder string, use the actual resume path from profile
+                    # This fixes the issue where AI says "[Resume will be uploaded]" but we need the real path
+                    # Check for common resume field labels: resume, cv, attach
+                    if user_profile and ("resume" in label.lower() or "cv" in label.lower() or "attach" in label.lower()):
+                         actual_path = user_profile.get("resume_path")
+                         if actual_path:
+                             print(f"Overriding file value with path from profile: {actual_path}")
+                             value = actual_path
+
                     await self._fill_file_field(page, selector, value)
                 elif field_type == "react_select":
                     await self._fill_react_select(page, selector, value, label)
@@ -1367,20 +1422,7 @@ class GreenhouseApplier:
         except Exception as e:
             print(f"Error filling react-select {label}: {e}")
 
-    async def _fill_file_field(self, page: Page, selector: str, value: str):
-        """Fill a file upload field."""
-        if not selector:
-            return
-            
-        locator = page.locator(selector).first
-        if await locator.count() > 0:
-            # Value should be a file path
-            if os.path.exists(value):
-                await locator.set_input_files(value)
-            else:
-                print(f"File not found: {value}")
-        else:
-            print(f"File input not found: {selector}")
+
 
 
     async def _submit_form(self, page: Page, verification_callback: Any | None = None) -> dict[str, Any]:
@@ -1406,11 +1448,17 @@ class GreenhouseApplier:
             # #application_confirmation is success
             
             # We poll for both conditions
-            for _ in range(30): # 30 attempts, 1 sec each
+            for _ in range(90): # Increased to 90s per user request
                 # 1. Success
                 if await page.locator("#application_confirmation").count() > 0:
                     return {"status": "success", "message": "Application submitted successfully."}
                 
+                # Check for validation errors
+                error_elem = page.locator("#error_message, .error-message, .field-error-msg").first
+                if await error_elem.count() > 0 and await error_elem.is_visible():
+                     error_text = await error_elem.inner_text()
+                     return {"status": "failed", "message": f"Validation Error detected: {error_text}"}
+
                 # 2. Verification Modal
                 if await page.locator(".email-verification").count() > 0:
                      print("EMAIL VERIFICATION REQUIRED")
@@ -1434,25 +1482,18 @@ class GreenhouseApplier:
                      await page.wait_for_timeout(500)
 
                      # Click Verify/Submit button in modal
-                     # Try generic button search within the verification container
                      verify_btn = page.locator(".email-verification button, #email-verification-submit, button:has-text('Verify'), button:has-text('Submit Code')").first
                      if await verify_btn.count() > 0 and await verify_btn.is_visible():
                          print("Clicking verify button...")
                          await verify_btn.click()
                      else:
                          print("Verify button not found, assuming auto-submit or using main submit...")
-                         
-                         # Fallback: Maybe the main submit button needs to be clicked again? 
-                         # User said "another submit has to be pressed". 
-                         # Often the modal has its own button. If not found, we might need to re-click the main #submit_app button?
-                         # Let's try re-clicking the main submit button if the modal doesn't have one
                          if submit_btn and await submit_btn.is_visible():
                              print("Re-clicking main submit button...")
                              await submit_btn.click()
-
+                             
                      # Wait for post-verification submit check
                      await page.wait_for_timeout(2000)
-                     # Loop will continue to check for confirmation
                 
                 # Check URL changes (confirmation page)
                 current_url = page.url
@@ -1462,7 +1503,18 @@ class GreenhouseApplier:
                 await page.wait_for_timeout(1000)
             
             # Timeout
-            return {"status": "unknown", "message": "Submit clicked but confirmation not detected."}
+            current_url = page.url
+            try:
+                title = await page.title()
+            except:
+                title = "Unknown"
+                
+            print(f"Submission timed out. Final URL: {current_url}, Title: {title}")
+            
+            if "jobs/" in current_url and "thank" not in current_url.lower() and "confirm" not in current_url.lower():
+                 return {"status": "unknown", "message": f"Submit clicked but still on job page: {current_url} (possible validation error?)"}
+
+            return {"status": "unknown", "message": f"Submit clicked but confirmation not detected. Final URL: {current_url}"}
             
         except Exception as e:
             print(f"Error during submission check: {e}")
