@@ -4,6 +4,8 @@ Setup script for demo mode.
 Creates the test user in MongoDB for demo/testing purposes.
 """
 import asyncio
+import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 from app.db import upsert_user, get_user, close_database
@@ -22,8 +24,26 @@ async def main():
     user_email = "thomasariogpt@gmail.com"
     user_id = user_email.replace("@", "_").replace(".", "_")
     
-    # Vultr path format
-    vultr_resume_path = f"/data/resumes/{user_id}/resume.pdf"
+    # Determined path based on OS
+    if os.name == 'nt':
+        # Windows (Local Dev)
+        base_dir = Path(__file__).parent / "data" / "resumes" / user_id
+        resume_path = base_dir / "resume.pdf"
+        
+        # Ensure directory and dummy file exist
+        print(f"\n[Windows] Configuring local resume path: {base_dir}")
+        base_dir.mkdir(parents=True, exist_ok=True)
+        
+        if not resume_path.exists():
+            print("   Creating dummy resume.pdf...")
+            with open(resume_path, "wb") as f:
+                f.write(b"%PDF-1.4\n%Dummy Resume PDF Content")
+        
+        final_path = str(resume_path)
+    else:
+        # Linux (Vultr Production)
+        final_path = f"/data/resumes/{user_id}/resume.pdf"
+        print(f"\n[Linux] Using Vultr resume path: {final_path}")
     
     test_user = {
         "email": user_email,
@@ -34,7 +54,7 @@ async def main():
         "linkedin_url": "https://linkedin.com/in/dummy-candidate",
         "website_url": "https://dummy-portfolio.com",
         "github_url": "https://github.com/dummy-candidate",
-        "resume_path": vultr_resume_path,
+        "resume_path": final_path,
         "education": [
             {
                 "degree": "Bachelor of Science in Computer Science",
@@ -82,8 +102,8 @@ async def main():
     print("=" * 60)
     print(f"\nNext steps:")
     print(f"1. Run scraper: py -c \"import asyncio; from app.fetching.scraper import run_scraper; asyncio.run(run_scraper())\"")
-    print(f"2. Test application: py manual_debug_greenhouse.py")
-    print(f"3. Test with submission: py manual_debug_greenhouse.py --submit")
+    print(f"2. Restart API (if running) so it picks up the DB change")
+    print(f"3. Run integration test: py test_integration.py")
     
     await close_database()
 

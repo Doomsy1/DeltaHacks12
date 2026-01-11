@@ -1,5 +1,6 @@
 """Application endpoints for the two-phase job application flow."""
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -348,14 +349,25 @@ async def submit_application(
     fingerprint = app.get("form_fingerprint")
 
     # Fill and submit
-    applier = GreenhouseApplier(headless=True)
+    # DEBUG: Set headless=False to see browser during testing
+    applier = GreenhouseApplier(headless=False)
+
+    # Define verification callback for server console interaction
+    async def server_verification_callback():
+        print("\n" + "!" * 50)
+        print(f"ACTION REQUIRED: Email Verification for Application {application_id}")
+        print("Please check your email and enter the 8-digit code below:")
+        print("!" * 50)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, input, "Verification Code: ")
 
     try:
         result = await applier.fill_and_submit(
             url=job_url,
             fields=fields,
             expected_fingerprint=None, # Disable strict check for demo robustness
-            submit=True
+            submit=True,
+            verification_callback=server_verification_callback
         )
     except Exception as e:
         await update_application(application_id, {
