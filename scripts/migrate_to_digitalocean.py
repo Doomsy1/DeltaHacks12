@@ -29,7 +29,7 @@ VULTR_PREFIX = "deltahacks-storage-real/hls/"
 # =============================================================================
 # CONFIGURATION - DigitalOcean Spaces (Destination)
 # =============================================================================
-DO_ENDPOINT = os.getenv("DO_SPACES_ENDPOINT", "https://tor1.digitaloceanspaces.com")
+DO_ENDPOINT = os.getenv("DO_SPACES_ENDPOINT", "https://deltahacksvideos.tor1.digitaloceanspaces.com")
 DO_ACCESS_KEY = os.getenv("DO_SPACES_ACCESS_KEY", "")
 DO_SECRET_KEY = os.getenv("DO_SPACES_SECRET_KEY", "")
 DO_BUCKET = os.getenv("DO_SPACES_BUCKET", "deltahacks-videos")
@@ -209,7 +209,7 @@ def main():
         print(f"❌ Errors: {error_count} files")
     print()
     print(f"📍 CDN URL pattern:")
-    print(f"   https://deltahacks-videos.tor1.cdn.digitaloceanspaces.com/hls/{{video_id}}/master.m3u8")
+    print(f"   https://deltahacksvideos.tor1.cdn.digitaloceanspaces.com/hls/{{video_id}}/master.m3u8")
     print()
 
 if __name__ == "__main__":

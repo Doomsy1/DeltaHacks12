@@ -460,7 +460,7 @@ s3_key_poster = f"hls/{video_id}/poster.jpg"
 ### CDN URLs
 
 ```python
-CDN_BASE = "https://deltahacks-videos.tor1.cdn.digitaloceanspaces.com"
+CDN_BASE = "https://deltahacksvideos.tor1.cdn.digitaloceanspaces.com"
 playback_url = f"{CDN_BASE}/hls/{video_id}/master.m3u8"
 poster_url = f"{CDN_BASE}/hls/{video_id}/poster.jpg"
 ```
