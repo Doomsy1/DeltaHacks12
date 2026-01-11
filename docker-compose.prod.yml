@@ -53,7 +53,7 @@ services:
       - MAX_FILE_SIZE=${MAX_FILE_SIZE:-524288000}
       # DigitalOcean Spaces CDN - direct public URLs, no presigning needed
       - DO_SPACES_CDN_URL=${DO_SPACES_CDN_URL:-https://deltahacksvideos.tor1.cdn.digitaloceanspaces.com}
-      - DO_SPACES_ENDPOINT=${DO_SPACES_ENDPOINT:-https://deltahacksvideos.tor1.digitaloceanspaces.com}
+      - DO_SPACES_ENDPOINT=${DO_SPACES_ENDPOINT:-https://tor1.digitaloceanspaces.com}
       - DO_SPACES_ACCESS_KEY=${DO_SPACES_ACCESS_KEY:-}
       - DO_SPACES_SECRET_KEY=${DO_SPACES_SECRET_KEY:-}
       - DO_SPACES_BUCKET=${DO_SPACES_BUCKET:-deltahacksvideos}
@@ -94,7 +94,7 @@ services:
       - MONGODB_URI=${MONGODB_URI}
       - MONGODB_DB=${MONGODB_DB}
       - TEXT_TO_VIDEO_API_URL=http://text-to-video:8000
-      - DO_SPACES_ENDPOINT=${DO_SPACES_ENDPOINT:-https://deltahacksvideos.tor1.digitaloceanspaces.com}
+      - DO_SPACES_ENDPOINT=${DO_SPACES_ENDPOINT:-https://tor1.digitaloceanspaces.com}
       - DO_SPACES_ACCESS_KEY=${DO_SPACES_ACCESS_KEY:-}
       - DO_SPACES_SECRET_KEY=${DO_SPACES_SECRET_KEY:-}
       - DO_SPACES_BUCKET=${DO_SPACES_BUCKET:-deltahacksvideos}

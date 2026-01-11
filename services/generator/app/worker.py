@@ -27,7 +27,7 @@ MONGODB_DB = os.getenv("MONGODB_DB", "app")
 TEXT_TO_VIDEO_API_URL = os.getenv("TEXT_TO_VIDEO_API_URL", "http://text-to-video:8000")
 
 # DigitalOcean Spaces Configuration
-DO_SPACES_ENDPOINT = os.getenv("DO_SPACES_ENDPOINT", "https://deltahacksvideos.tor1.digitaloceanspaces.com")
+DO_SPACES_ENDPOINT = os.getenv("DO_SPACES_ENDPOINT", "https://tor1.digitaloceanspaces.com")
 DO_SPACES_ACCESS_KEY = os.getenv("DO_SPACES_ACCESS_KEY", "")
 DO_SPACES_SECRET_KEY = os.getenv("DO_SPACES_SECRET_KEY", "")
 DO_SPACES_BUCKET = os.getenv("DO_SPACES_BUCKET", "deltahacksvideos")
