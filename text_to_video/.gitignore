@@ -1,5 +1,4 @@
 .env
-cache/
 
 # Python
 __pycache__/
@@ -28,14 +27,11 @@ wheels/
 
 # Generated content
 output/
-cache/
 *.mp3
-*.mp4
 *.wav
 
-# Keep background videos
-!text_to_video/assets/backgrounds/GTA.mp4
-!text_to_video/assets/backgrounds/Minecraft.mp4
+# Keep all background videos
+!assets/backgrounds/*.mp4
 
 
 # Environment variables
