@@ -218,7 +218,8 @@ async def analyze_application(
                 url=job.get("absolute_url", ""),
                 fields=fields,
                 expected_fingerprint=fingerprint,
-                submit=True
+                submit=True,
+                keep_browser_open=True  # Keep browser for potential verification
             )
         except Exception as e:
             await update_application(application_id, {
@@ -226,6 +227,27 @@ async def analyze_application(
                 "error": str(e)
             })
             raise HTTPException(status_code=502, detail=f"Failed to submit: {e}")
+
+        # Handle verification required
+        if result.get("status") == "verification_required":
+            # Store browser session for later
+            browser = result.get("browser")
+            page = result.get("page")
+            context = result.get("context")
+            
+            if browser and page and context:
+                store_session(application_id, page, browser, context)
+            
+            await update_application(application_id, {
+                "status": ApplicationState.PENDING_VERIFICATION.value,
+                "fields": fields
+            })
+            
+            return SubmitResponse(
+                application_id=application_id,
+                status="pending_verification",
+                message="Email verification required. Check your email for the 8-digit code and call POST /{application_id}/verify",
+            )
 
         # Update final status
         if result.get("status") == "success":

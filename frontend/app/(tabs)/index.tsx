@@ -317,7 +317,20 @@ const VideoWrapper = ({
             } else if (result.status === "submitted") {
               console.log(`✅ Application submitted successfully!`);
             } else if (result.status === "failed") {
-              console.error(`❌ Application failed: ${result.error || result.message}`);
+              const errorMessage = result.error || result.message || "";
+              console.error(`❌ Application failed: ${errorMessage}`);
+              
+              // Check if email verification is required
+              if (errorMessage.toLowerCase().includes("email verification") || 
+                  errorMessage.toLowerCase().includes("verification required")) {
+                console.log(`🔐 Email verification required for application ${result.application_id}`);
+                if (result.application_id) {
+                  setPendingApplicationId(result.application_id);
+                  setShowOTPModal(true);
+                } else {
+                  console.error(`❌ Application ID missing in failed response`);
+                }
+              }
             }
           }
         })
