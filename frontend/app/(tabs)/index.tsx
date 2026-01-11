@@ -60,7 +60,7 @@ async function fetchVideosFromSemanticSearch(resetIfEmpty: boolean = false): Pro
   try {
     // Step 1: Use semantic search to get greenhouse_ids (which are the same as video_ids)
     const searchUrl = `${API_BASE_URL}/jobs/search`;
-    console.log("🌐 [NGROK/TUNNEL CHECK] Starting API request:");
+    console.log("🌐 Starting API request:");
     console.log("  URL:", searchUrl);
     console.log("  Method: POST");
     console.log("  Timestamp:", new Date().toISOString());
@@ -82,7 +82,7 @@ async function fetchVideosFromSemanticSearch(resetIfEmpty: boolean = false): Pro
       });
       
       const elapsed = Date.now() - startTime;
-      console.log(`✅ [NGROK/TUNNEL CHECK] Request completed in ${elapsed}ms`);
+      console.log(`✅ Request completed in ${elapsed}ms`);
       console.log("  Status:", searchResponse.status, searchResponse.statusText);
       console.log("  OK:", searchResponse.ok);
       console.log("  URL resolved to:", searchResponse.url);
@@ -94,19 +94,18 @@ async function fetchVideosFromSemanticSearch(resetIfEmpty: boolean = false): Pro
       
     } catch (fetchError: any) {
       const elapsed = Date.now() - startTime;
-      console.error(`❌ [NGROK/TUNNEL CHECK] Network error after ${elapsed}ms:`);
+      console.error(`❌ Network error after ${elapsed}ms:`);
       console.error("  Error type:", fetchError?.name || 'Unknown');
       console.error("  Error message:", fetchError?.message || String(fetchError));
       console.error("  This usually means:");
       console.error("    - Backend is not running");
-      console.error("    - ngrok/tunnel is not connected");
       console.error("    - Network connectivity issue");
       console.error("    - URL is incorrect");
       throw fetchError;
     }
     
     if (!searchResponse.ok) {
-      console.error(`❌ [NGROK/TUNNEL CHECK] HTTP error ${searchResponse.status}:`);
+      console.error(`❌ HTTP error ${searchResponse.status}:`);
       console.error("  Status:", searchResponse.status, searchResponse.statusText);
       console.error("  URL:", searchUrl);
       
@@ -212,7 +211,7 @@ async function fetchVideosFromSemanticSearch(resetIfEmpty: boolean = false): Pro
     console.log(`Loaded ${validUrls.length} HLS URLs`);
     return validUrls;
   } catch (error: any) {
-    console.error("❌ [NGROK/TUNNEL CHECK] Fatal error in fetchVideosFromSemanticSearch:");
+    console.error("❌ Fatal error in fetchVideosFromSemanticSearch:");
     console.error("  Error type:", error?.name || 'Unknown');
     console.error("  Error message:", error?.message || String(error));
     console.error("  Stack:", error?.stack || 'No stack trace');
