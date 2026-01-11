@@ -673,19 +673,22 @@ class GreenhouseApplier:
         for field in fields:
             value = field.get("final_value") or field.get("recommended_value")
             label = field.get("label")
+            field_type = field.get("field_type")
+            is_required = field.get("required")
+
+            # FILTER: Only fill required fields (unless it's a file/resume)
+            if not is_required and field_type != "file":
+                print(f"Skipping OPTIONAL field: '{label}'")
+                continue
             
             if not value:
-                if field.get("required"):
+                if is_required:
                     print(f"Skipping required field with NO value: '{label}'")
-                else:
-                    # Optional field with no value
-                    pass
                 continue
 
-            print(f"Filling field '{label}' (Type: {field['field_type']}) with value: '{str(value)[:50]}...'")
+            print(f"Filling field '{label}' (Type: {field_type}) with value: '{str(value)[:50]}...'")
             
             selector = field.get("selector")
-            field_type = field.get("field_type")
 
             try:
                 if field_type == "file":
@@ -718,6 +721,10 @@ class GreenhouseApplier:
             # Special handling for phone fields (often use intl-tel-input which needs typing)
             is_phone = "phone" in selector.lower() or await locator.get_attribute("type") == "tel"
             
+            # Always click and clear first
+            await locator.click()
+            await locator.clear()
+
             if is_phone:
                 # Handle intl-tel-input (iti) dropdown if present
                 try:
@@ -744,12 +751,8 @@ class GreenhouseApplier:
                 except Exception as e:
                     print(f"Debug: Failed to set ITI country code: {e}")
 
-                await locator.click()
-                await locator.clear()
-                # Use sequences for phone numbers to trigger any mask/formatting logic
-                await locator.press_sequentially(str(value), delay=50)
-            else:
-                await locator.fill(str(value))
+            # Use sequences for ALL text fields to trigger React/event listeners reliably
+            await locator.press_sequentially(str(value), delay=20)
         else:
              print(f"Text field not found: {selector}")
 
