@@ -978,7 +978,7 @@ async def search_jobs(request: SearchJobsRequest):
         pipeline = [
             {
                 "$vectorSearch": {
-                    "index": "jobs_semantic_search",
+                    "index": "vector_index",
                     "path": "embedding",
                     "queryVector": query_vector,
                     "numCandidates": VECTOR_SEARCH_CANDIDATES,
