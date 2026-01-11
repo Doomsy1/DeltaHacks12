@@ -1,14 +1,30 @@
 import os
-from typing import List
-from fastapi import FastAPI, HTTPException, Query
+from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Query, Depends, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
-from pydantic import BaseModel
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError, DuplicateKeyError, OperationFailure
+from pydantic import BaseModel, EmailStr
+from bson import ObjectId
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 import google.generativeai as genai
+from .auth import verify_password, get_password_hash, create_access_token, verify_token
 
 app = FastAPI()
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Security
+security = HTTPBearer()
 
 # Load environment variables
 MONGODB_URI = os.getenv("MONGODB_URI", "")
@@ -28,6 +44,7 @@ EMBEDDING_DIMENSION = 768
 # MongoDB client (will be initialized on startup)
 client = None
 db = None
+users_collection = None
 user_job_views_collection = None
 jobs_collection = None
 
@@ -36,6 +53,23 @@ s3_client = None
 
 
 # Pydantic models for request/response
+class UserRegister(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user_id: str
+    email: str
+
+
 class MarkSeenRequest(BaseModel):
     user_id: str
     greenhouse_id: str
@@ -66,7 +100,7 @@ class SearchJobsResponse(BaseModel):
 @app.on_event("startup")
 async def startup_db_client():
     """Initialize MongoDB connection, S3 client, and Gemini API on startup"""
-    global client, db, s3_client, user_job_views_collection, jobs_collection
+    global client, db, s3_client, users_collection, user_job_views_collection, jobs_collection
     
     # Initialize MongoDB
     if MONGODB_URI:
@@ -76,6 +110,40 @@ async def startup_db_client():
             # Test the connection
             await client.admin.command('ping')
             print(f"✓ Connected to MongoDB Atlas (database: {MONGODB_DB})")
+            
+            # Initialize users collection and create unique index on email
+            users_collection = db.users
+            try:
+                await users_collection.create_index([("email", 1)], unique=True, name="email_unique_idx")
+                print("✓ users collection initialized with index")
+            except Exception as e:
+                # Index already exists with a different name - check if it's the same index
+                error_str = str(e)
+                if "Index already exists" in error_str or "IndexOptionsConflict" in error_str or isinstance(e, OperationFailure):
+                    # Check if there's already a unique index on email
+                    try:
+                        existing_indexes = await users_collection.list_indexes().to_list(length=10)
+                        email_index_exists = any(
+                            idx.get("key", {}).get("email") == 1 and idx.get("unique") is True
+                            for idx in existing_indexes
+                        )
+                        if email_index_exists:
+                            print("✓ users collection already has unique email index")
+                        else:
+                            # Try to drop old index and create new one
+                            try:
+                                await users_collection.drop_index("email_1")
+                                await users_collection.create_index([("email", 1)], unique=True, name="email_unique_idx")
+                                print("✓ users collection index updated")
+                            except Exception as drop_error:
+                                print(f"⚠ Could not update email index: {drop_error}")
+                                print("  Index exists but may have different name - continuing anyway")
+                    except Exception as list_error:
+                        print(f"⚠ Could not check existing indexes: {list_error}")
+                        print("  Continuing anyway - index may already exist")
+                else:
+                    # Re-raise if it's not an index conflict error
+                    raise
             
             # Initialize user_job_views collection and create index
             user_job_views_collection = db.user_job_views
@@ -94,6 +162,7 @@ async def startup_db_client():
             print(f"✗ MongoDB connection failed: {e}")
             client = None
             db = None
+            users_collection = None
             user_job_views_collection = None
             jobs_collection = None
     else:
@@ -376,6 +445,131 @@ async def health_storage():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Object Storage error: {str(e)}")
+
+
+# ============================================================================
+# Authentication - User registration and login
+# ============================================================================
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get the current user from JWT token."""
+    if users_collection is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    
+    token = credentials.credentials
+    payload = verify_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    user = await users_collection.find_one({"_id": ObjectId(user_id)})
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    return user
+
+
+@app.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register(user_data: UserRegister):
+    """Register a new user."""
+    if users_collection is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    
+    # Check if user already exists
+    existing_user = await users_collection.find_one({"email": user_data.email})
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Hash password and create user
+    hashed_password = get_password_hash(user_data.password)
+    user_doc = {
+        "email": user_data.email,
+        "hashed_password": hashed_password,
+        "created_at": None  # Will be set by MongoDB if using timestamps
+    }
+    
+    try:
+        result = await users_collection.insert_one(user_doc)
+        user_id = str(result.inserted_id)
+        
+        # Create access token
+        access_token = create_access_token(data={"sub": user_id, "email": user_data.email})
+        
+        return TokenResponse(
+            access_token=access_token,
+            token_type="bearer",
+            user_id=user_id,
+            email=user_data.email
+        )
+    except DuplicateKeyError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+async def login(user_data: UserLogin):
+    """Login and get access token."""
+    if users_collection is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    
+    # Find user by email
+    user = await users_collection.find_one({"email": user_data.email})
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Verify password
+    if not verify_password(user_data.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Create access token
+    user_id = str(user["_id"])
+    access_token = create_access_token(data={"sub": user_id, "email": user_data.email})
+    
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user_id=user_id,
+        email=user_data.email
+    )
+
+
+@app.get("/auth/me")
+async def get_current_user_info(current_user: dict = Depends(get_current_user)):
+    """Get current user information."""
+    return {
+        "user_id": str(current_user["_id"]),
+        "email": current_user["email"]
+    }
 
 
 # ============================================================================
