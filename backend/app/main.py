@@ -701,3 +701,63 @@ async def search_jobs(request: SearchJobsRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+
+@app.get("/videos/list")
+async def list_videos(limit: int = Query(default=4, ge=1, le=100)):
+    """
+    List video files from Vultr Object Storage.
+    
+    Args:
+        limit: Maximum number of videos to return (default: 4, max: 100)
+    
+    Returns:
+        JSON with list of video URLs
+    """
+    if not s3_client:
+        raise HTTPException(status_code=503, detail="Object Storage not configured or unavailable")
+    
+    if not VULTR_BUCKET:
+        raise HTTPException(status_code=500, detail="VULTR_BUCKET not configured")
+    
+    try:
+        # List objects in the bucket
+        response = s3_client.list_objects_v2(
+            Bucket=VULTR_BUCKET,
+            MaxKeys=limit
+        )
+        
+        if 'Contents' not in response:
+            return {
+                "videos": [],
+                "count": 0
+            }
+        
+        # Filter for video files and construct URLs
+        video_extensions = {'.mp4', '.mov', '.avi', '.webm', '.m4v'}
+        videos = []
+        
+        for obj in response['Contents']:
+            key = obj['Key']
+            # Check if it's a video file
+            if any(key.lower().endswith(ext) for ext in video_extensions):
+                # Construct public URL
+                video_url = f"{VULTR_ENDPOINT}/{VULTR_BUCKET}/{key}"
+                videos.append({
+                    "key": key,
+                    "url": video_url,
+                    "size": obj.get('Size', 0),
+                    "last_modified": obj.get('LastModified').isoformat() if obj.get('LastModified') else None
+                })
+        
+        return {
+            "videos": videos[:limit],
+            "count": len(videos[:limit])
+        }
+        
+    except ClientError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to list videos from Object Storage: {str(e)}"
+        )
+

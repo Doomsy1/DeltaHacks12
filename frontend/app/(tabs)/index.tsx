@@ -13,14 +13,51 @@ import {
   Pressable,
   StyleSheet,
   Share,
+  ActivityIndicator,
 } from "react-native";
 
-import { videos, videos2, videos3 } from "../../assets/data";
 import { VideoView, useVideoPlayer } from "expo-video";
 import { ReelOverlay } from "../../components/ReelOverlay";
 import { Ionicons } from "@expo/vector-icons";
+import Config from "../../config";
 
 const { height, width } = Dimensions.get("window");
+
+// Configuration pulled from environment variables
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+
+// Function to fetch video list from backend API
+async function fetchVideosFromBackend(): Promise<string[]> {
+  try {
+    const apiUrl = `${API_BASE_URL}/videos/list?limit=4`;
+    
+    console.log("Fetching 4 videos from backend API:", apiUrl);
+    
+    const response = await fetch(apiUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      console.error("Failed to fetch videos from backend:", response.status);
+      return [];
+    }
+    
+    const data = await response.json();
+    const videos = data.videos || [];
+    
+    // Extract URLs from the response
+    const videoUrls = videos.map((video: any) => video.url);
+    
+    console.log(`Loaded ${videoUrls.length} videos from backend`);
+    return videoUrls;
+  } catch (error) {
+    console.error("Error fetching videos from backend:", error);
+    return [];
+  }
+}
 
 interface VideoWrapper {
   data: ListRenderItemInfo<string>;
@@ -141,21 +178,51 @@ const VideoWrapper = ({
 export default function HomeScreen() {
   const bottomHeight = useBottomTabBarHeight();
 
-  const [allVideos, setAllVideos] = useState(videos);
+  const [allVideos, setAllVideos] = useState<string[]>([]);
   const [visibleIndex, setVisibleIndex] = useState(0);
   const [pauseOverride, setPauseOverride] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const numOfRefreshes = useRef(0);
+  const hasMore = useRef(true);
 
-  const fetchMoreData = () => {
-    if (numOfRefreshes.current === 0) {
-      setAllVideos([...allVideos, ...videos2]);
-    }
-    if (numOfRefreshes.current === 1) {
-      setAllVideos([...allVideos, ...videos3]);
+  // Load initial videos from backend
+  useEffect(() => {
+    async function loadInitialVideos() {
+      try {
+        setLoading(true);
+        const videos = await fetchVideosFromBackend();
+        
+        if (videos.length === 0) {
+          setError("No videos found");
+        } else {
+          setAllVideos(videos);
+        }
+      } catch (err) {
+        console.error("Error loading videos:", err);
+        setError("Failed to load videos");
+      } finally {
+        setLoading(false);
+      }
     }
 
+    loadInitialVideos();
+  }, []);
+
+  const fetchMoreData = async () => {
+    // For pagination, you could fetch more videos from Vultr
+    // For now, we'll just prevent infinite loading
+    if (numOfRefreshes.current > 0) {
+      hasMore.current = false;
+      return;
+    }
+    
     numOfRefreshes.current += 1;
+    
+    // Optionally fetch more videos from Vultr
+    // const moreVideos = await fetchVideosFromVultr();
+    // setAllVideos([...allVideos, ...moreVideos]);
   };
 
   const onViewableItemsChanged = (event: any) => {
@@ -176,6 +243,31 @@ export default function HomeScreen() {
       });
     }, 100);
   };
+
+  // Show loading state
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "black", justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator size="large" color="#fff" />
+        <Text style={{ color: "#fff", marginTop: 20 }}>Loading videos...</Text>
+      </View>
+    );
+  }
+
+  // Show error state
+  if (error || allVideos.length === 0) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "black", justifyContent: "center", alignItems: "center", padding: 20 }}>
+        <Ionicons name="cloud-offline" size={60} color="#fff" style={{ opacity: 0.5 }} />
+        <Text style={{ color: "#fff", marginTop: 20, fontSize: 18, textAlign: "center" }}>
+          {error || "No videos available"}
+        </Text>
+        <Text style={{ color: "#aaa", marginTop: 10, fontSize: 14, textAlign: "center" }}>
+          Make sure your backend is running and Vultr Object Storage is configured
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: "black" }}>
