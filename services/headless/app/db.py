@@ -178,19 +178,31 @@ async def upsert_user(user_doc: dict[str, Any]) -> bool:
         return False
 
 
-async def get_user(email: str) -> dict[str, Any] | None:
+async def get_user(email_or_id: str) -> dict[str, Any] | None:
     """
-    Get a user by email.
+    Get a user by email or MongoDB ObjectId.
 
     Args:
-        email: User's email address
+        email_or_id: User's email address or MongoDB ObjectId string
 
     Returns:
         User document or None if not found
     """
     db = await get_database()
     collection = db.users
-    return await collection.find_one({"email": email})
+    
+    # Try to parse as ObjectId first
+    try:
+        object_id = ObjectId(email_or_id)
+        user = await collection.find_one({"_id": object_id})
+        if user:
+            return user
+    except Exception:
+        # Not a valid ObjectId, continue to email lookup
+        pass
+    
+    # Fall back to email lookup
+    return await collection.find_one({"email": email_or_id})
 
 
 # ============ Application Functions ============

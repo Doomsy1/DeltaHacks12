@@ -49,7 +49,7 @@ async def main():
         "email": user_email,
         "first_name": "Charlieeee",
         "last_name": "Kirkeee",
-        "phone": "647-555-0123",
+        "phone": "+1 3052475339",  # Hardcoded phone number matching greenhouse.py
         "location": "Toronto, ON, Canada",
         "linkedin_url": "https://linkedin.com/in/charliekirrrk",
         "website_url": "https://kirkinator.dev",
@@ -79,7 +79,8 @@ async def main():
         "veteran_status": "I am not a protected veteran",
         "disability": "I do not have a disability",
         "authorization": "I am authorized to work in this country for any employer",
-        "sponsorship": "I do not require sponsorship"
+        "sponsorship": "I do not require sponsorship",
+        "salary": "Negotiable based on total compensation"  # Added salary field
     }
     
     print(f"\n1. Upserting test user: {user_email}")
