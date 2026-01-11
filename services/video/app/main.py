@@ -22,6 +22,7 @@ VULTR_BUCKET = os.getenv("VULTR_BUCKET", "")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
 PRESIGNED_URL_EXPIRY = int(os.getenv("PRESIGNED_URL_EXPIRY", "3600"))  # Default 1 hour
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "524288000"))  # Default 500MB in bytes
+PUBLIC_HLS_BASE_URL = os.getenv("PUBLIC_HLS_BASE_URL", "")  # Base URL for public HLS files
 
 # MongoDB client
 client = None
@@ -252,67 +253,45 @@ async def upload_video(
 @app.get("/video/{video_id}")
 async def get_video(video_id: str):
     """
-    Get a presigned URL for a video file.
+    Get HLS playback URLs for a video.
     
     This endpoint is public (no authentication required).
-    Videos are stored as private objects in S3 and only accessible via presigned URLs.
+    Returns URLs pointing to HLS files stored in Vultr Object Storage.
     
     Args:
-        video_id: UUID of the video
+        video_id: The video ID (greenhouse_id) used as the folder name in HLS storage
     
     Returns:
-        JSON with video_id, presigned URL, and expiry information
+        JSON with video_id, playback URLs (HLS manifest and poster), and metadata
     """
-    if not s3_client:
-        raise HTTPException(status_code=503, detail="Object Storage not configured or unavailable")
+    if not PUBLIC_HLS_BASE_URL:
+        # Fallback: construct from VULTR_ENDPOINT and VULTR_BUCKET if PUBLIC_HLS_BASE_URL not set
+        if VULTR_ENDPOINT and VULTR_BUCKET:
+            # Construct public URL: https://{bucket}.{region}.vultrobjects.com or {endpoint}/{bucket}
+            if VULTR_ENDPOINT.endswith('/'):
+                base_url = f"{VULTR_ENDPOINT.rstrip('/')}/{VULTR_BUCKET}"
+            else:
+                base_url = f"{VULTR_ENDPOINT}/{VULTR_BUCKET}"
+        else:
+            raise HTTPException(
+                status_code=500, 
+                detail="PUBLIC_HLS_BASE_URL not configured and cannot construct from VULTR_ENDPOINT/VULTR_BUCKET"
+            )
+    else:
+        base_url = PUBLIC_HLS_BASE_URL.rstrip('/')
     
-    if videos_collection is None:
-        raise HTTPException(status_code=503, detail="MongoDB not connected")
-    
-    if not VULTR_BUCKET:
-        raise HTTPException(status_code=500, detail="VULTR_BUCKET not configured")
-    
-    # Fetch video metadata from MongoDB
-    try:
-        video_doc = await videos_collection.find_one({"video_id": video_id})
-        if not video_doc:
-            raise HTTPException(status_code=404, detail=f"Video not found: {video_id}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
-    s3_key = video_doc.get("s3_key")
-    if not s3_key:
-        raise HTTPException(status_code=500, detail="Video metadata incomplete: missing s3_key")
-    
-    # Generate presigned URL
-    try:
-        # For Vultr Object Storage, use the endpoint URL directly
-        presigned_url = s3_client.generate_presigned_url(
-            'get_object',
-            Params={
-                'Bucket': VULTR_BUCKET,
-                'Key': s3_key
-            },
-            ExpiresIn=PRESIGNED_URL_EXPIRY
-        )
-        
-        # Vultr Object Storage sometimes requires the endpoint to be included in the presigned URL
-        # If the presigned URL doesn't already have the endpoint, add it
-        if not presigned_url.startswith(VULTR_ENDPOINT.replace('https://', '').replace('http://', '')):
-            pass  # URL should already be correct
-    except ClientError as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Failed to generate presigned URL: {str(e)}"
-        )
+    # Construct HLS URLs
+    hls_base_path = f"hls/{video_id}"
+    playback_url = f"{base_url}/{hls_base_path}/master.m3u8"
+    poster_url = f"{base_url}/{hls_base_path}/poster.jpg"
     
     return {
         "video_id": video_id,
-        "url": presigned_url,
-        "expires_in": PRESIGNED_URL_EXPIRY,
-        "expires_at": (datetime.utcnow() + timedelta(seconds=PRESIGNED_URL_EXPIRY)).isoformat(),
-        "filename": video_doc.get("filename"),
-        "size_bytes": video_doc.get("size_bytes"),
-        "job_id": video_doc.get("job_id"),
-        "uploaded_at": video_doc.get("uploaded_at").isoformat() if video_doc.get("uploaded_at") else None
+        "playback": {
+            "type": "hls",
+            "url": playback_url
+        },
+        "poster_url": poster_url,
+        "duration_s": None,
+        "aspect_ratio": "9:16"
     }

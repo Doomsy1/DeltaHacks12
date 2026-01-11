@@ -55,9 +55,39 @@ console.log('  EXPO_PUBLIC_API_BASE_URL:', process.env.EXPO_PUBLIC_API_BASE_URL 
 // Hardcoded sample user ID for testing
 const SAMPLE_USER_ID = 'sample-user-123';
 
+// Hardcoded test video IDs for testing (these are actual video IDs in Vultr Object Storage)
+const TEST_VIDEO_IDS = [
+  "48561bf3",
+  "48562485",
+  "48562a69",
+  "48562c60",
+  "48563e71",
+  "48563ec4",
+  "48564cb2",
+  "48564d21",
+  "48565024",
+  "48565185",
+  "48565f15",
+  "485664b7",
+  "4856895c",
+  "4856a00d",
+  "4856aa09",
+  "4856bac1",
+  "4856bb17",
+  "4856d458",
+  "4856ef20",
+  "4856f32c"
+];
+
 // Function to fetch videos using semantic search
 async function fetchVideosFromSemanticSearch(resetIfEmpty: boolean = false): Promise<string[]> {
   try {
+    // For testing: use hardcoded test video IDs
+    console.log("🧪 Using test video IDs for testing");
+    let videoIds: string[] = [...TEST_VIDEO_IDS];
+    
+    // TODO: Uncomment below to use semantic search instead of test IDs
+    /*
     // Step 1: Use semantic search to get greenhouse_ids (which are the same as video_ids)
     const searchUrl = `${API_BASE_URL}/jobs/search`;
     console.log("🌐 Starting API request:");
@@ -166,6 +196,7 @@ async function fetchVideosFromSemanticSearch(resetIfEmpty: boolean = false): Pro
       console.log("No job IDs found from search");
       return [];
     }
+    */
     
     console.log(`Found ${videoIds.length} video IDs (greenhouse_ids), fetching HLS URLs...`);
     
