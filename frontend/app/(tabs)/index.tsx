@@ -12,14 +12,13 @@ import {
   Text,
   Pressable,
   StyleSheet,
-  ImageStyle,
   Share,
 } from "react-native";
 
 import { videos, videos2, videos3 } from "../../assets/data";
-import { Video, ResizeMode, AVPlaybackNativeSource } from "expo-av";
-// import Video, { ResizeMode, VideoRef } from "react-native-video";
-import { Image } from "expo-image";
+import { VideoView, useVideoPlayer } from "expo-video";
+import { ReelOverlay } from "../../components/ReelOverlay";
+import { Ionicons } from "@expo/vector-icons";
 
 const { height, width } = Dimensions.get("window");
 
@@ -43,21 +42,60 @@ const VideoWrapper = ({
   const bottomHeight = useBottomTabBarHeight();
   const { index, item } = data;
 
-  // const videoRef = useRef<VideoRef>(null);
+  const player = useVideoPlayer(allVideos[index], (player) => {
+    player.loop = true;
+    player.muted = false;
+  });
 
-  // useEffect(() => {
-  //   videoRef.current?.seek(0);
-  // }, [visibleIndex]);
+  // State for like/dislike
+  const [isLiked, setIsLiked] = useState(false);
+  const [isDisliked, setIsDisliked] = useState(false);
+  const [likeCount, setLikeCount] = useState(12400);
+  const [dislikeCount, setDislikeCount] = useState(150);
 
-  const videoRef = useRef<Video | null>(null);
-
-  useEffect(() => {
-    if (visibleIndex === index) {
-      videoRef.current?.setPositionAsync(0);
+  const handleLike = () => {
+    if (isLiked) {
+      setIsLiked(false);
+      setLikeCount(likeCount - 1);
+    } else {
+      setIsLiked(true);
+      setLikeCount(likeCount + 1);
+      if (isDisliked) {
+        setIsDisliked(false);
+        setDislikeCount(dislikeCount - 1);
+      }
     }
-  }, [visibleIndex, index]);
-  
-  
+  };
+
+  const handleDislike = () => {
+    if (isDisliked) {
+      setIsDisliked(false);
+      setDislikeCount(dislikeCount - 1);
+    } else {
+      setIsDisliked(true);
+      setDislikeCount(dislikeCount + 1);
+      if (isLiked) {
+        setIsLiked(false);
+        setLikeCount(likeCount - 1);
+      }
+    }
+  };
+
+  // Control playback based on visibility and pause override
+  useEffect(() => {
+    if (visibleIndex === index && !pauseOverride) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [visibleIndex, index, pauseOverride, player]);
+
+  // Reset video to 0:00 when scrolling away from it
+  useEffect(() => {
+    if (visibleIndex !== index) {
+      player.currentTime = 0;
+    }
+  }, [visibleIndex, index, player]);
 
   return (
     <View
@@ -66,30 +104,36 @@ const VideoWrapper = ({
         width,
       }}
     >
-      {/* <Video
-        ref={videoRef}
-        source={{ uri: allVideos[index] }}
+      <VideoView
+        player={player}
         style={{ height: height - bottomHeight, width }}
-        resizeMode="cover"
-        paused={visibleIndex !== index || pauseOverride}
-      /> */}
-
-      <Video
-        ref={videoRef}
-        source={{ uri: allVideos[index] }}
-        style={{ height: height - bottomHeight, width }}
-        resizeMode={ResizeMode.COVER}
-        shouldPlay={visibleIndex === index && !pauseOverride}
-        isLooping
+        contentFit="cover"
+        nativeControls={false}
       />
 
+      <Pressable onPress={pause} style={$tapOverlay} />
 
-      <Pressable onPress={pause} style={$overlay} />
+      <ReelOverlay
+        companyName="Company Name"
+        title="Video Title Goes Here"
+        description="This is a sample description for the video content. It can be up to two lines long."
+        likeCount={likeCount}
+        dislikeCount={dislikeCount}
+        shareCount={3200}
+        isLiked={isLiked}
+        isDisliked={isDisliked}
+        onLike={handleLike}
+        onDislike={handleDislike}
+        onShare={() => share(item)}
+        onProfilePress={() => console.log("Profile pressed")}
+      />
 
-      <Pressable onPress={() => share(item)} style={$shareButtonContainer}>
-        <Image source="share" style={$shareButtonImage} />
-        <Text style={$shareButtonText}>Share</Text>
-      </Pressable>
+      {/* Pause indicator that sticks to this video */}
+      {pauseOverride && visibleIndex === index && (
+        <View style={$pauseIndicator}>
+          <Ionicons name="pause" size={60} color="#fff" style={{ opacity: 0.3 }} />
+        </View>
+      )}
     </View>
   );
 };
@@ -159,56 +203,24 @@ export default function HomeScreen() {
           );
         }}
       />
-      {pauseOverride && (
-        <Pressable style={$pauseIndicator}>
-          <Image source="pause" style={$playButtonImage} />
-        </Pressable>
-      )}
     </View>
   );
 }
 
-const $overlay: ViewStyle = {
+const $tapOverlay: ViewStyle = {
   ...StyleSheet.absoluteFillObject,
-  backgroundColor: "black",
-  opacity: 0.3,
+  backgroundColor: "transparent",
 };
 
 const $pauseIndicator: ViewStyle = {
   position: "absolute",
-  alignSelf: "center",
-  top: height / 2 - 25,
-};
-
-const $playButtonImage: ImageStyle = {
-  height: 50,
-  width: 50,
+  top: "50%",
+  left: "50%",
+  transform: [{ translateX: -30 }, { translateY: -30 }],
   justifyContent: "center",
   alignItems: "center",
-  resizeMode: "contain",
+  pointerEvents: "none",
 };
 
-const $shareButtonContainer: ViewStyle = {
-  position: "absolute",
-  zIndex: 999,
-  elevation: 999,
-  bottom: Platform.OS === "android" ? 70 : 100,
-  right: 10,
-  alignItems: "center",
-  gap: 8,
-};
 
-const $shareButtonImage: ImageStyle = {
-  height: 25,
-  width: 25,
-  justifyContent: "center",
-  alignItems: "center",
-  resizeMode: "contain",
-  tintColor: "white",
-};
 
-const $shareButtonText: TextStyle = {
-  color: "white",
-  fontSize: 12,
-  fontWeight: "bold",
-};

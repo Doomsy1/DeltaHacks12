@@ -1,9 +1,12 @@
 import os
-from fastapi import FastAPI, HTTPException
+from typing import List
+from fastapi import FastAPI, HTTPException, Query
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
+from pydantic import BaseModel
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
+import google.generativeai as genai
 
 app = FastAPI()
 
@@ -17,18 +20,53 @@ VULTR_ACCESS_KEY = os.getenv("VULTR_ACCESS_KEY", "")
 VULTR_SECRET_KEY = os.getenv("VULTR_SECRET_KEY", "")
 VULTR_BUCKET = os.getenv("VULTR_BUCKET", "")
 
+# Gemini API configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+EMBEDDING_MODEL = "text-embedding-004"
+EMBEDDING_DIMENSION = 768
+
 # MongoDB client (will be initialized on startup)
 client = None
 db = None
+user_job_views_collection = None
+jobs_collection = None
 
 # S3 client for Vultr Object Storage
 s3_client = None
 
 
+# Pydantic models for request/response
+class MarkSeenRequest(BaseModel):
+    user_id: str
+    greenhouse_id: str
+
+
+class UserJobViewResponse(BaseModel):
+    user_id: str
+    greenhouse_id: str
+    seen: bool
+
+
+class BulkCheckRequest(BaseModel):
+    user_id: str
+    greenhouse_ids: List[str]
+
+
+class SearchJobsRequest(BaseModel):
+    text_prompt: str
+    user_id: str
+
+
+class SearchJobsResponse(BaseModel):
+    user_id: str
+    greenhouse_ids: List[str]
+    count: int
+
+
 @app.on_event("startup")
 async def startup_db_client():
-    """Initialize MongoDB connection and S3 client on startup"""
-    global client, db, s3_client
+    """Initialize MongoDB connection, S3 client, and Gemini API on startup"""
+    global client, db, s3_client, user_job_views_collection, jobs_collection
     
     # Initialize MongoDB
     if MONGODB_URI:
@@ -38,12 +76,38 @@ async def startup_db_client():
             # Test the connection
             await client.admin.command('ping')
             print(f"✓ Connected to MongoDB Atlas (database: {MONGODB_DB})")
+            
+            # Initialize user_job_views collection and create index
+            user_job_views_collection = db.user_job_views
+            # Create compound index on (user_id, greenhouse_id) for fast lookups
+            await user_job_views_collection.create_index(
+                [("user_id", 1), ("greenhouse_id", 1)],
+                unique=True,
+                name="user_greenhouse_unique_idx"
+            )
+            print("✓ user_job_views collection initialized with index")
+            
+            # Initialize jobs collection
+            jobs_collection = db.jobs
+            print("✓ jobs collection initialized")
         except (ConnectionFailure, ServerSelectionTimeoutError) as e:
             print(f"✗ MongoDB connection failed: {e}")
             client = None
             db = None
+            user_job_views_collection = None
+            jobs_collection = None
     else:
         print("⚠ MONGODB_URI not set - skipping MongoDB connection")
+    
+    # Initialize Gemini API
+    if GEMINI_API_KEY:
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            print(f"✓ Gemini API configured (model: {EMBEDDING_MODEL})")
+        except Exception as e:
+            print(f"✗ Gemini API configuration failed: {e}")
+    else:
+        print("⚠ GEMINI_API_KEY not set - skipping Gemini API configuration")
     
     # Initialize S3 client for Vultr Object Storage
     if VULTR_ENDPOINT and VULTR_ACCESS_KEY and VULTR_SECRET_KEY:
@@ -143,36 +207,102 @@ async def health():
 
 @app.get("/health/db")
 async def health_db():
-    """Dedicated MongoDB connection test endpoint"""
-    if not MONGODB_URI:
-        raise HTTPException(status_code=500, detail="MONGODB_URI not configured")
+    """Dedicated MongoDB connection test endpoint - tests handshake (ping)"""
+    global client, db
     
+    if not MONGODB_URI:
+        raise HTTPException(
+            status_code=500, 
+            detail="MONGODB_URI not configured. Set the MONGODB_URI environment variable."
+        )
+    
+    # Try to initialize connection if it wasn't set during startup
     if not client:
-        raise HTTPException(status_code=503, detail="MongoDB client not initialized")
+        try:
+            client = AsyncIOMotorClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+            db = client[MONGODB_DB]
+            print("✓ MongoDB client initialized on-demand (was not set during startup)")
+        except Exception as e:
+            raise HTTPException(
+                status_code=503, 
+                detail=f"MongoDB client initialization failed: {str(e)}. Check connection string and network."
+            )
     
     try:
-        # Ping the database
+        # Ping the database (handshake test) - this is the core connection test
         result = await client.admin.command('ping')
-        # Get database info
-        db_info = await db.command('dbStats')
         
-        return {
+        response = {
             "status": "connected",
             "mongodb_uri_set": bool(MONGODB_URI),
             "database": MONGODB_DB,
             "ping": result,
-            "database_stats": {
-                "name": db_info.get("db", MONGODB_DB),
-                "collections": db_info.get("collections", 0),
-                "data_size": db_info.get("dataSize", 0)
-            }
+            "handshake": "success"
         }
+        
+        # Try to get database info (optional - might fail due to permissions)
+        if db is not None:
+            try:
+                db_info = await db.command('dbStats')
+                response["database_stats"] = {
+                    "name": db_info.get("db", MONGODB_DB),
+                    "collections": db_info.get("collections", 0),
+                    "data_size": db_info.get("dataSize", 0)
+                }
+            except Exception as db_stats_error:
+                # dbStats failed but ping succeeded - connection is still healthy
+                response["database_stats"] = {
+                    "note": f"dbStats unavailable: {str(db_stats_error)} (connection is still healthy)"
+                }
+        else:
+            response["note"] = f"Database object not initialized (database: {MONGODB_DB})"
+        
+        return response
+        
     except ConnectionFailure as e:
-        raise HTTPException(status_code=503, detail=f"MongoDB connection failed: {str(e)}")
+        raise HTTPException(
+            status_code=503, 
+            detail=f"MongoDB connection failed: {str(e)}. Check your connection string and network."
+        )
     except ServerSelectionTimeoutError as e:
-        raise HTTPException(status_code=503, detail=f"MongoDB server selection timeout: {str(e)}")
+        raise HTTPException(
+            status_code=503, 
+            detail=f"MongoDB server selection timeout: {str(e)}. Possible causes: network issue, firewall blocking, or IP not whitelisted in MongoDB Atlas."
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"MongoDB error: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"MongoDB error ({type(e).__name__}): {str(e)}"
+        )
+
+
+@app.get("/health/db/ping")
+async def health_db_ping():
+    """Minimal MongoDB handshake test - just ping, no additional info"""
+    global client, db
+    
+    if not MONGODB_URI:
+        raise HTTPException(status_code=500, detail="MONGODB_URI not configured")
+    
+    # Try to initialize connection if it wasn't set during startup
+    if not client:
+        try:
+            client = AsyncIOMotorClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+            db = client[MONGODB_DB]
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"MongoDB client initialization failed: {str(e)}")
+    
+    try:
+        result = await client.admin.command('ping')
+        return {
+            "status": "ok",
+            "handshake": "success",
+            "ping": result
+        }
+    except (ConnectionFailure, ServerSelectionTimeoutError) as e:
+        raise HTTPException(status_code=503, detail=f"MongoDB handshake failed: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 @app.get("/health/storage")
@@ -246,3 +376,328 @@ async def health_storage():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Object Storage error: {str(e)}")
+
+
+# ============================================================================
+# User Job Views - Track which jobs a user has seen
+# ============================================================================
+
+@app.post("/user-job-views/mark-seen", response_model=UserJobViewResponse)
+async def mark_job_as_seen(request: MarkSeenRequest):
+    """
+    Mark a job as seen for a specific user.
+    
+    Creates a new record if it doesn't exist, or updates existing record.
+    Uses upsert to handle both cases atomically.
+    """
+    if user_job_views_collection is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    
+    try:
+        # Use upsert to create or update the record
+        result = await user_job_views_collection.update_one(
+            {"user_id": request.user_id, "greenhouse_id": request.greenhouse_id},
+            {"$set": {"seen": True}},
+            upsert=True
+        )
+        
+        return UserJobViewResponse(
+            user_id=request.user_id,
+            greenhouse_id=request.greenhouse_id,
+            seen=True
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.get("/user-job-views/check")
+async def check_job_seen(user_id: str = Query(...), greenhouse_id: str = Query(...)):
+    """
+    Check if a specific job has been seen by a user.
+    
+    Returns seen=true if the user has seen the job, false otherwise.
+    """
+    if user_job_views_collection is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    
+    try:
+        doc = await user_job_views_collection.find_one(
+            {"user_id": user_id, "greenhouse_id": greenhouse_id}
+        )
+        
+        return {
+            "user_id": user_id,
+            "greenhouse_id": greenhouse_id,
+            "seen": doc.get("seen", False) if doc else False
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.post("/user-job-views/bulk-check")
+async def bulk_check_jobs_seen(request: BulkCheckRequest):
+    """
+    Check multiple jobs at once for a user.
+    
+    Returns a dictionary mapping greenhouse_id -> seen status.
+    Useful for filtering a batch of jobs to only show unseen ones.
+    """
+    if user_job_views_collection is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    
+    try:
+        # Query all matching records for this user and the given greenhouse_ids
+        cursor = user_job_views_collection.find({
+            "user_id": request.user_id,
+            "greenhouse_id": {"$in": request.greenhouse_ids}
+        })
+        
+        # Build a set of seen greenhouse_ids
+        seen_ids = set()
+        async for doc in cursor:
+            if doc.get("seen", False):
+                seen_ids.add(doc["greenhouse_id"])
+        
+        # Build response with all greenhouse_ids
+        results = {gid: gid in seen_ids for gid in request.greenhouse_ids}
+        
+        return {
+            "user_id": request.user_id,
+            "results": results,
+            "seen_count": len(seen_ids),
+            "unseen_count": len(request.greenhouse_ids) - len(seen_ids)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.get("/user-job-views/seen-jobs")
+async def get_seen_jobs(
+    user_id: str = Query(...),
+    limit: int = Query(100, ge=1, le=1000),
+    skip: int = Query(0, ge=0)
+):
+    """
+    Get all jobs that a user has seen.
+    
+    Returns a paginated list of greenhouse_ids that the user has seen.
+    """
+    if user_job_views_collection is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    
+    try:
+        cursor = user_job_views_collection.find(
+            {"user_id": user_id, "seen": True},
+            {"greenhouse_id": 1, "_id": 0}
+        ).skip(skip).limit(limit)
+        
+        seen_jobs = []
+        async for doc in cursor:
+            seen_jobs.append(doc["greenhouse_id"])
+        
+        # Get total count
+        total = await user_job_views_collection.count_documents(
+            {"user_id": user_id, "seen": True}
+        )
+        
+        return {
+            "user_id": user_id,
+            "seen_jobs": seen_jobs,
+            "count": len(seen_jobs),
+            "total": total,
+            "skip": skip,
+            "limit": limit
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.delete("/user-job-views/reset")
+async def reset_user_job_views(user_id: str = Query(...)):
+    """
+    Reset all seen jobs for a user (mark all as unseen / delete records).
+    
+    Useful for allowing users to re-discover jobs they've already seen.
+    """
+    if user_job_views_collection is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    
+    try:
+        result = await user_job_views_collection.delete_many({"user_id": user_id})
+        
+        return {
+            "user_id": user_id,
+            "deleted_count": result.deleted_count,
+            "message": f"Reset {result.deleted_count} job views for user"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# ============================================================================
+# Semantic Job Search - Vector search with unseen jobs filtering
+# ============================================================================
+
+@app.post("/jobs/search", response_model=SearchJobsResponse)
+async def search_jobs(request: SearchJobsRequest):
+    """
+    Search for jobs using semantic similarity.
+    
+    Takes a text prompt and user_id, returns the 5 most relevant jobs the user hasn't seen yet.
+    Uses MongoDB vector search with Gemini embeddings.
+    Automatically marks the returned jobs as seen.
+    
+    Args:
+        text_prompt: Natural language search query (e.g., "Python developer remote")
+        user_id: User ID to filter out already-seen jobs
+    
+    Returns:
+        List of 5 most relevant greenhouse_ids (marked as seen)
+    """
+    if jobs_collection is None or user_job_views_collection is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
+    
+    try:
+        # Step 1: Generate embedding for the text prompt
+        try:
+            # Use the google-generativeai SDK to generate embeddings
+            # Note: For text-embedding-004, the model name should include "models/" prefix
+            model_name = f"models/{EMBEDDING_MODEL}" if not EMBEDDING_MODEL.startswith("models/") else EMBEDDING_MODEL
+            
+            embedding_result = genai.embed_content(
+                model=model_name,
+                content=request.text_prompt,
+                task_type="RETRIEVAL_QUERY",
+                output_dimensionality=EMBEDDING_DIMENSION
+            )
+            
+            # Extract embedding - the result structure may vary by SDK version
+            # Common formats: dict with 'embedding' key, or object with .embedding attribute
+            if isinstance(embedding_result, dict):
+                query_vector = embedding_result.get('embedding', embedding_result.get('values', None))
+            else:
+                query_vector = getattr(embedding_result, 'embedding', getattr(embedding_result, 'values', None))
+            
+            if query_vector is None:
+                # Fallback: if result is directly a list
+                query_vector = embedding_result if isinstance(embedding_result, list) else list(embedding_result)
+            
+            # Convert to list if needed and validate
+            query_vector = list(query_vector)
+            if len(query_vector) != EMBEDDING_DIMENSION:
+                raise ValueError(f"Embedding dimension mismatch: expected {EMBEDDING_DIMENSION}, got {len(query_vector)}")
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Failed to generate embedding: {str(e)}")
+        
+        # Step 2: Get list of greenhouse_ids the user has already seen
+        seen_cursor = user_job_views_collection.find(
+            {"user_id": request.user_id, "seen": True},
+            {"greenhouse_id": 1, "_id": 0}
+        )
+        seen_greenhouse_ids = []
+        async for doc in seen_cursor:
+            seen_greenhouse_ids.append(str(doc["greenhouse_id"]))  # Ensure string format
+        
+        # Quick check: verify jobs exist in database
+        jobs_count = await jobs_collection.count_documents({"active": True})
+        if jobs_count == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="No active jobs found in database"
+            )
+        
+        # Step 3: Build vector search pipeline
+        # Filter: active=true AND greenhouse_id NOT IN seen_greenhouse_ids
+        vector_search_filter = {"active": True}
+        if seen_greenhouse_ids:
+            vector_search_filter["greenhouse_id"] = {"$nin": seen_greenhouse_ids}
+        
+        # MongoDB vector search aggregation pipeline
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": "jobs_semantic_search",
+                    "path": "embedding",
+                    "queryVector": query_vector,
+                    "numCandidates": 50,  # Search more candidates to ensure we get 5 after filtering
+                    "limit": 5,
+                    "filter": vector_search_filter
+                }
+            },
+            {
+                "$addFields": {
+                    "score": {"$meta": "vectorSearchScore"}
+                }
+            },
+            {
+                "$project": {
+                    "greenhouse_id": 1,
+                    "score": 1,
+                    "_id": 0
+                }
+            },
+            {
+                "$limit": 5
+            }
+        ]
+        
+        # Step 4: Execute vector search
+        results = []
+        vector_search_worked = False
+        try:
+            async for doc in jobs_collection.aggregate(pipeline):
+                if doc.get("greenhouse_id"):
+                    results.append(str(doc["greenhouse_id"]))  # Ensure string format
+                    vector_search_worked = True
+        except Exception as agg_error:
+            # If vector search fails (e.g., index doesn't exist), try a simpler approach
+            error_msg = str(agg_error)
+            print(f"Vector search failed: {error_msg}. Attempting fallback query...")
+            
+            # Check if it's an index error
+            if "index" in error_msg.lower() or "vector" in error_msg.lower():
+                # Fallback to non-vector search
+                vector_search_worked = False
+        
+        # Fallback: If vector search returned 0 results but jobs exist, use regular query
+        # This handles the case where the vector search index doesn't exist yet
+        if not results and jobs_count > 0:
+            print("Vector search returned 0 results. Using fallback non-vector query...")
+            fallback_filter = {"active": True}
+            if seen_greenhouse_ids:
+                fallback_filter["greenhouse_id"] = {"$nin": seen_greenhouse_ids}
+            
+            # Just get first 5 jobs matching criteria (without vector search)
+            cursor = jobs_collection.find(fallback_filter, {"greenhouse_id": 1, "_id": 0}).limit(5)
+            async for doc in cursor:
+                if doc.get("greenhouse_id"):
+                    results.append(str(doc["greenhouse_id"]))
+        
+        if not results:
+            return SearchJobsResponse(
+                user_id=request.user_id,
+                greenhouse_ids=[],
+                count=0
+            )
+        
+        # Step 5: Mark the returned jobs as seen
+        for greenhouse_id in results:
+            await user_job_views_collection.update_one(
+                {"user_id": request.user_id, "greenhouse_id": greenhouse_id},
+                {"$set": {"seen": True}},
+                upsert=True
+            )
+        
+        return SearchJobsResponse(
+            user_id=request.user_id,
+            greenhouse_ids=results,
+            count=len(results)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
