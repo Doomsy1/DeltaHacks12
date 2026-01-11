@@ -56,7 +56,7 @@ console.log('  EXPO_PUBLIC_API_BASE_URL:', process.env.EXPO_PUBLIC_API_BASE_URL 
 // Hardcoded sample user ID for testing
 const SAMPLE_USER_ID = 'sample-user-123';
 
-// Hardcoded test video IDs for testing (these are actual video IDs in Vultr Object Storage)
+// Hardcoded test video IDs for testing (these are actual video IDs in DigitalOcean Spaces)
 const TEST_VIDEO_IDS = [
   "48561bf3",
   "48562485",

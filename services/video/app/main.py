@@ -1,18 +1,15 @@
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Header, Depends, Query
-from fastapi.responses import JSONResponse, Response, RedirectResponse
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Header, Depends
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
-
-from app.s3_client import get_s3_client, get_presigned_url, fetch_object
-from app.hls_rewrite import rewrite_playlist
 
 app = FastAPI(title="Video Service", description="Video upload and retrieval service")
 
@@ -28,21 +25,26 @@ app.add_middleware(
 # Load environment variables
 MONGODB_URI = os.getenv("MONGODB_URI", "")
 MONGODB_DB = os.getenv("MONGODB_DB", "app")
-VULTR_ENDPOINT = os.getenv("VULTR_ENDPOINT", "")
-VULTR_ACCESS_KEY = os.getenv("VULTR_ACCESS_KEY", "")
-VULTR_SECRET_KEY = os.getenv("VULTR_SECRET_KEY", "")
-VULTR_BUCKET = os.getenv("VULTR_BUCKET", "")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
-PRESIGNED_URL_EXPIRY = int(os.getenv("PRESIGNED_URL_EXPIRY", "3600"))  # Default 1 hour
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "524288000"))  # Default 500MB in bytes
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")  # Base URL for HLS gateway (e.g., http://localhost:8002)
+
+# DigitalOcean Spaces CDN Configuration
+# CDN endpoint provides global edge caching for low-latency video delivery
+DO_SPACES_CDN_URL = os.getenv("DO_SPACES_CDN_URL", "https://deltahacks-videos.tor1.cdn.digitaloceanspaces.com")
+
+# DigitalOcean Spaces S3-compatible configuration (for uploads if needed)
+DO_SPACES_ENDPOINT = os.getenv("DO_SPACES_ENDPOINT", "https://tor1.digitaloceanspaces.com")
+DO_SPACES_ACCESS_KEY = os.getenv("DO_SPACES_ACCESS_KEY", "")
+DO_SPACES_SECRET_KEY = os.getenv("DO_SPACES_SECRET_KEY", "")
+DO_SPACES_BUCKET = os.getenv("DO_SPACES_BUCKET", "deltahacks-videos")
+DO_SPACES_REGION = os.getenv("DO_SPACES_REGION", "tor1")
 
 # MongoDB client
 client = None
 db = None
 videos_collection = None
 
-# S3 client for Vultr Object Storage
+# S3 client for DigitalOcean Spaces
 s3_client = None
 
 
@@ -76,38 +78,30 @@ async def startup_db_client():
     else:
         print("⚠ MONGODB_URI not set - skipping MongoDB connection")
     
-    # Initialize S3 client for Vultr Object Storage
-    if VULTR_ENDPOINT and VULTR_ACCESS_KEY and VULTR_SECRET_KEY:
+    # Initialize S3 client for DigitalOcean Spaces (for uploads)
+    if DO_SPACES_ACCESS_KEY and DO_SPACES_SECRET_KEY:
         try:
-            # Extract region from endpoint (e.g., https://ewr1.vultrobjects.com -> ewr1)
-            # Vultr Object Storage uses the endpoint region for signing
-            import re
-            region_match = re.search(r'//([^.]+)\.vultrobjects\.com', VULTR_ENDPOINT)
-            region = region_match.group(1) if region_match else 'us-east-1'
-            
             s3_client = boto3.client(
                 's3',
-                endpoint_url=VULTR_ENDPOINT,
-                aws_access_key_id=VULTR_ACCESS_KEY,
-                aws_secret_access_key=VULTR_SECRET_KEY,
-                region_name=region,
+                endpoint_url=DO_SPACES_ENDPOINT,
+                aws_access_key_id=DO_SPACES_ACCESS_KEY,
+                aws_secret_access_key=DO_SPACES_SECRET_KEY,
+                region_name=DO_SPACES_REGION,
                 config=Config(signature_version='s3v4')
             )
-            if VULTR_BUCKET:
-                try:
-                    s3_client.head_bucket(Bucket=VULTR_BUCKET)
-                    print(f"✓ Connected to Vultr Object Storage (bucket: {VULTR_BUCKET})")
-                except ClientError as e:
-                    print(f"⚠ Vultr Object Storage bucket '{VULTR_BUCKET}' not found or not accessible")
-            else:
-                print(f"✓ Vultr Object Storage client initialized (endpoint: {VULTR_ENDPOINT})")
-                print("⚠ VULTR_BUCKET not set")
+            try:
+                s3_client.head_bucket(Bucket=DO_SPACES_BUCKET)
+                print(f"✓ Connected to DigitalOcean Spaces (bucket: {DO_SPACES_BUCKET})")
+            except ClientError as e:
+                print(f"⚠ DigitalOcean Spaces bucket '{DO_SPACES_BUCKET}' not found or not accessible")
         except Exception as e:
-            print(f"✗ Vultr Object Storage connection failed: {e}")
+            print(f"✗ DigitalOcean Spaces connection failed: {e}")
             s3_client = None
     else:
-        if VULTR_ENDPOINT or VULTR_ACCESS_KEY or VULTR_SECRET_KEY:
-            print("⚠ Vultr Object Storage credentials incomplete - skipping S3 client initialization")
+        print("⚠ DO_SPACES credentials not set - uploads disabled")
+    
+    # Log CDN configuration
+    print(f"✓ CDN configured: {DO_SPACES_CDN_URL}")
 
 
 @app.on_event("shutdown")
@@ -130,13 +124,12 @@ async def health():
             "connected": client is not None and db is not None
         },
         "object_storage": {
-            "configured": bool(VULTR_ENDPOINT and VULTR_ACCESS_KEY and VULTR_SECRET_KEY),
-            "connected": s3_client is not None,
-            "bucket": VULTR_BUCKET if VULTR_BUCKET else None
+            "cdn_url": DO_SPACES_CDN_URL,
+            "bucket": DO_SPACES_BUCKET,
+            "upload_enabled": s3_client is not None
         },
         "config": {
             "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024),
-            "presigned_url_expiry_seconds": PRESIGNED_URL_EXPIRY
         }
     }
     return health_status
@@ -150,7 +143,7 @@ async def upload_video(
     api_key: str = Depends(verify_api_key)
 ):
     """
-    Upload a video file to Vultr Object Storage.
+    Upload a video file to DigitalOcean Spaces.
     
     Requirements:
     - Content-Type: video/mp4
@@ -172,9 +165,6 @@ async def upload_video(
     
     if videos_collection is None:
         raise HTTPException(status_code=503, detail="MongoDB not connected")
-    
-    if not VULTR_BUCKET:
-        raise HTTPException(status_code=500, detail="VULTR_BUCKET not configured")
     
     # Validate file extension (primary check)
     if not file.filename or not file.filename.lower().endswith('.mp4'):
@@ -212,13 +202,14 @@ async def upload_video(
     video_id = str(uuid.uuid4())
     s3_key = f"jobs/{job_id}/{video_id}.mp4"
     
-    # Upload to S3 (make it private - only accessible via presigned URLs)
+    # Upload to S3 with public-read ACL
     try:
         s3_client.put_object(
-            Bucket=VULTR_BUCKET,
+            Bucket=DO_SPACES_BUCKET,
             Key=s3_key,
             Body=content,
-            ContentType='video/mp4'
+            ContentType='video/mp4',
+            ACL='public-read'
         )
     except ClientError as e:
         raise HTTPException(
@@ -243,7 +234,7 @@ async def upload_video(
     except Exception as e:
         # If MongoDB insert fails, try to delete the S3 object
         try:
-            s3_client.delete_object(Bucket=VULTR_BUCKET, Key=s3_key)
+            s3_client.delete_object(Bucket=DO_SPACES_BUCKET, Key=s3_key)
         except:
             pass
         raise HTTPException(
@@ -263,204 +254,18 @@ async def upload_video(
     }
 
 
-@app.get("/hls/{key:path}")
-async def get_hls_playlist(key: str):
-    """
-    Fetch and rewrite HLS playlist from S3.
-    
-    This endpoint fetches a playlist from Vultr Object Storage and rewrites all URIs
-    to point to our API gateway endpoints.
-    
-    Args:
-        key: S3 key path (e.g., "hls/abc123/master.m3u8")
-    
-    Returns:
-        Rewritten playlist with correct Content-Type headers
-    """
-    # Security: ensure key starts with hls/
-    if not key.startswith("hls/"):
-        raise HTTPException(status_code=400, detail="Key must start with 'hls/'")
-    
-    try:
-        # Fetch playlist from S3
-        playlist_content = fetch_object(key)
-        playlist_text = playlist_content.decode('utf-8')
-        
-        # Get API base URL (empty string for relative paths, or PUBLIC_BASE_URL if set)
-        api_base = PUBLIC_BASE_URL.rstrip('/') if PUBLIC_BASE_URL else ""
-        
-        # Create presigned URL generator function for latency optimization
-        # This embeds presigned URLs directly in playlists, eliminating redirect overhead
-        from app.s3_client import PRESIGN_EXPIRES_SECONDS
-        def generate_presigned_for_segment(segment_key: str) -> str:
-            return get_presigned_url(segment_key, expires_in=PRESIGN_EXPIRES_SECONDS)
-        
-        # Rewrite the playlist with presigned URL generation enabled
-        rewritten = rewrite_playlist(playlist_text, key, api_base, presigned_url_generator=generate_presigned_for_segment)
-        
-        # Count rewritten URIs for logging
-        original_lines = playlist_text.split('\n')
-        rewritten_lines = rewritten.split('\n')
-        uri_count = sum(1 for line in original_lines if line.strip() and not line.strip().startswith('#'))
-        
-        # Count how many presigned URLs were embedded (for logging)
-        presigned_count = sum(1 for line in rewritten_lines if 'vultrobjects.com' in line or 'X-Amz-Signature' in line)
-        
-        # Log
-        print(f"[HLS] Served playlist: key={key}, size={len(playlist_content)} bytes, segments={uri_count}, presigned_urls={presigned_count}")
-        
-        # Return with cache headers (playlists can be cached briefly since they contain presigned URLs)
-        # Cache for 5 minutes - this is safe because presigned URLs expire after 2 hours
-        return Response(
-            content=rewritten,
-            media_type="application/vnd.apple.mpegurl",
-            headers={
-                "Cache-Control": "public, max-age=300",  # Cache for 5 minutes (presigned URLs valid for 2 hours)
-                "Access-Control-Allow-Origin": "*",
-            }
-        )
-    
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[HLS] Error serving playlist key={key}: {error_msg}")
-        raise HTTPException(status_code=502, detail=f"Failed to fetch playlist: {error_msg}")
-
-
-@app.get("/hls-seg/{key:path}")
-async def get_hls_segment(key: str):
-    """
-    Generate presigned URL and redirect to segment (FALLBACK ENDPOINT).
-    
-    NOTE: This endpoint is kept for backward compatibility and as a fallback.
-    Modern playlists embed presigned URLs directly, eliminating redirect latency.
-    This endpoint should only be hit if presigned URLs in playlists expire.
-    
-    Args:
-        key: S3 key path (e.g., "hls/abc123/720p/seg_000.ts")
-    
-    Returns:
-        302 redirect to presigned URL
-    """
-    # Security: ensure key starts with hls/
-    if not key.startswith("hls/"):
-        raise HTTPException(status_code=400, detail="Key must start with 'hls/'")
-    
-    try:
-        from app.s3_client import PRESIGN_EXPIRES_SECONDS
-        # Generate presigned URL
-        presigned_url = get_presigned_url(key, expires_in=PRESIGN_EXPIRES_SECONDS)
-        
-        # Log (first 80 chars only)
-        url_preview = presigned_url[:80] + "..." if len(presigned_url) > 80 else presigned_url
-        print(f"[HLS-SEG] Redirect: key={key}, url_preview={url_preview}")
-        
-        # Return 307 redirect (preserves method)
-        # Use 302 for better compatibility with some video players
-        return RedirectResponse(
-            url=presigned_url,
-            status_code=302,  # Changed from 307 to 302 for better video player compatibility
-            headers={
-                "Cache-Control": "private, max-age=60",
-                "Access-Control-Allow-Origin": "*",  # Ensure CORS for redirects
-            }
-        )
-    
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[HLS-SEG] Error generating presigned URL key={key}: {error_msg}")
-        raise HTTPException(status_code=502, detail=f"Failed to generate presigned URL: {error_msg}")
-
-
-@app.head("/hls-seg/{key:path}")
-async def head_hls_segment(key: str):
-    """
-    HEAD request for HLS segment (FALLBACK ENDPOINT - for debugging).
-    
-    NOTE: This endpoint is kept for backward compatibility and debugging.
-    Modern playlists embed presigned URLs directly, eliminating the need for this endpoint.
-    
-    Args:
-        key: S3 key path
-    
-    Returns:
-        HEAD response with redirect location
-    """
-    # Security: ensure key starts with hls/
-    if not key.startswith("hls/"):
-        raise HTTPException(status_code=400, detail="Key must start with 'hls/'")
-    
-    try:
-        from app.s3_client import PRESIGN_EXPIRES_SECONDS
-        presigned_url = get_presigned_url(key, expires_in=PRESIGN_EXPIRES_SECONDS)
-        
-        # Return HEAD response with Location header
-        return Response(
-            status_code=302,
-            headers={
-                "Location": presigned_url,
-                "Cache-Control": "private, max-age=60",
-                "Access-Control-Allow-Origin": "*",
-            }
-        )
-    
-    except Exception as e:
-        error_msg = str(e)
-        raise HTTPException(status_code=502, detail=f"Failed to generate presigned URL: {error_msg}")
-
-
-@app.get("/hls-debug/presign")
-async def debug_presign(key: str = Query(...), api_key: str = Depends(verify_api_key)):
-    """
-    Debug endpoint to test presigned URL generation.
-    
-    Protected endpoint that returns the resolved key and presigned URL
-    for debugging purposes.
-    
-    Args:
-        key: S3 key to generate presigned URL for
-        api_key: API key from header (verified by dependency)
-    
-    Returns:
-        JSON with resolved key and presigned URL
-    """
-    # Security: ensure key starts with hls/
-    if not key.startswith("hls/"):
-        raise HTTPException(status_code=400, detail="Key must start with 'hls/'")
-    
-    try:
-        from app.s3_client import PRESIGN_EXPIRES_SECONDS, S3_ADDRESSING_STYLE, get_s3_key, S3_KEY_PREFIX, VULTR_BUCKET as S3_BUCKET
-        from urllib.parse import urlparse
-        
-        presigned_url = get_presigned_url(key, expires_in=PRESIGN_EXPIRES_SECONDS)
-        
-        # Extract host from URL for debugging
-        parsed = urlparse(presigned_url)
-        
-        resolved_key = get_s3_key(key)
-        
-        return {
-            "input_key": key,
-            "resolved_key": resolved_key,
-            "presigned_url": presigned_url,
-            "host": parsed.netloc,
-            "expires_in_seconds": PRESIGN_EXPIRES_SECONDS,
-            "addressing_style": S3_ADDRESSING_STYLE,
-            "bucket": S3_BUCKET,
-            "key_prefix": S3_KEY_PREFIX,
-        }
-    
-    except Exception as e:
-        error_msg = str(e)
-        raise HTTPException(status_code=500, detail=f"Debug presign failed: {error_msg}")
-
-
 @app.get("/video/{video_id}")
 async def get_video(video_id: str):
     """
     Get HLS playback URLs for a video.
     
-    This endpoint is public (no authentication required).
-    Returns absolute URL to the master playlist via our HLS gateway.
+    Returns direct CDN URLs for HLS playback. No presigned URLs or redirects needed
+    since DigitalOcean Spaces CDN serves content publicly with edge caching.
+    
+    Benefits:
+    - Low latency: CDN edge caching near users
+    - No redirects: Direct URLs in playlist
+    - Simple: No presigned URL generation or playlist rewriting
     
     Args:
         video_id: The video ID (greenhouse_id) used as the folder name in HLS storage
@@ -468,21 +273,11 @@ async def get_video(video_id: str):
     Returns:
         JSON with video_id, playback URLs (HLS manifest and poster), and metadata
     """
-    if not PUBLIC_BASE_URL:
-        raise HTTPException(
-            status_code=500,
-            detail="PUBLIC_BASE_URL not configured"
-        )
+    cdn_base = DO_SPACES_CDN_URL.rstrip('/')
     
-    base_url = PUBLIC_BASE_URL.rstrip('/')
-    
-    # Construct HLS URLs (keeping hls/ prefix, so it becomes /hls/hls/{video_id}/master.m3u8)
-    hls_key = f"hls/{video_id}/master.m3u8"
-    playback_url = f"{base_url}/hls/{hls_key}"
-    
-    # Poster URL (also via gateway)
-    poster_key = f"hls/{video_id}/poster.jpg"
-    poster_url = f"{base_url}/hls-seg/{poster_key}"
+    # Construct direct CDN URLs
+    playback_url = f"{cdn_base}/hls/{video_id}/master.m3u8"
+    poster_url = f"{cdn_base}/hls/{video_id}/poster.jpg"
     
     return {
         "video_id": video_id,
