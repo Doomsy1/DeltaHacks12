@@ -307,7 +307,18 @@ const VideoWrapper = ({
             console.error(`❌ Failed to submit application: ${response.status} ${response.statusText}`, errorText);
           } else {
             const result = await response.json();
-            console.log(`✅ Application submitted successfully:`, result);
+            console.log(`✅ Application response:`, result);
+
+            // Check if 2FA verification is required
+            if (result.status === "pending_verification") {
+              console.log(`🔐 2FA required for application ${result.application_id}`);
+              setPendingApplicationId(result.application_id);
+              setShowOTPModal(true);
+            } else if (result.status === "submitted") {
+              console.log(`✅ Application submitted successfully!`);
+            } else if (result.status === "failed") {
+              console.error(`❌ Application failed: ${result.error || result.message}`);
+            }
           }
         })
         .catch((error: any) => {
@@ -422,6 +433,7 @@ export default function HomeScreen() {
   // State for email verification OTP modal
   const [showOTPModal, setShowOTPModal] = useState(false);
   const [otpCode, setOtpCode] = useState<string | null>(null);
+  const [pendingApplicationId, setPendingApplicationId] = useState<string | null>(null);
 
   // Expose function to trigger OTP modal from console (for testing)
   useEffect(() => {
@@ -790,16 +802,44 @@ export default function HomeScreen() {
       {/* OTP Input Modal - shows on top of everything when email verification is required */}
       <OTPInputModal
         visible={showOTPModal}
-        onCodeSubmit={(code) => {
+        onCodeSubmit={async (code) => {
           console.log("OTP Code submitted:", code);
           setOtpCode(code);
+
+          if (pendingApplicationId && user?.user_id) {
+            try {
+              const verifyUrl = `${HEADLESS_SERVICE_URL}/api/v1/applications/${pendingApplicationId}/verify`;
+              console.log(`🔐 Verifying application ${pendingApplicationId} with code...`);
+
+              const response = await fetch(verifyUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-User-ID": user.user_id,
+                },
+                body: JSON.stringify({ code }),
+              });
+
+              const result = await response.json();
+              console.log(`🔐 Verification result:`, result);
+
+              if (result.status === "submitted") {
+                console.log(`✅ Application verified and submitted!`);
+              } else {
+                console.error(`❌ Verification failed: ${result.error || result.message}`);
+              }
+            } catch (error) {
+              console.error(`❌ Verification request failed:`, error);
+            }
+          }
+
           setShowOTPModal(false);
-          // TODO: Pass the code to the application submission flow
-          // This code should be passed to the backend API when resuming the job application
+          setPendingApplicationId(null);
         }}
         onCancel={() => {
           setShowOTPModal(false);
           setOtpCode(null);
+          setPendingApplicationId(null);
         }}
       />
     </View>

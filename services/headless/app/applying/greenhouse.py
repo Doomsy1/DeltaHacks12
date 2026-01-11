@@ -176,7 +176,8 @@ class GreenhouseApplier:
         submit: bool = True,
         keep_open: bool = False,
         output_path: str | None = None,
-        verification_callback: Any | None = None
+        verification_callback: Any | None = None,
+        keep_browser_open: bool = False
     ) -> dict[str, Any]:
         """
         Fill and optionally submit a job application form.
@@ -190,13 +191,18 @@ class GreenhouseApplier:
             submit: Whether to click submit
             keep_open: Whether to keep browser open after completion (waits for user input)
             output_path: Optional path to save the final HTML content
+            verification_callback: Optional callback for email verification (local testing)
+            keep_browser_open: If True and verification is needed, DON'T close browser - return it
 
         Returns:
-            Result dict with status and message
+            Result dict with status and message. If status is "verification_required" and
+            keep_browser_open is True, also includes browser, page, and context objects.
         """
         async with BROWSER_SEMAPHORE:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=self.headless)
+                should_close_browser = True  # Default: close browser on exit
+                
                 try:
                     context = await browser.new_context()
                     page = await context.new_page()
@@ -256,6 +262,15 @@ class GreenhouseApplier:
                     if submit:
                         result = await self._submit_form(page, verification_callback=verification_callback)
                     
+                    # If verification is required and we should keep browser open,
+                    # return the browser session instead of closing it
+                    if result.get("status") == "verification_required" and keep_browser_open:
+                        should_close_browser = False  # Don't close - caller will store it
+                        result["browser"] = browser
+                        result["page"] = page
+                        result["context"] = context
+                        return result
+                    
                     # Save output HTML if requested
                     if output_path:
                         try:
@@ -273,7 +288,8 @@ class GreenhouseApplier:
                         
                     return result
                 finally:
-                    await browser.close()
+                    if should_close_browser:
+                        await browser.close()
 
     async def _extract_form_fields(self, page: Page) -> list[dict[str, Any]]:
         """Extract all form fields from the page."""
@@ -1464,38 +1480,23 @@ class GreenhouseApplier:
                 # 2. Verification Modal
                 if await page.locator(".email-verification").count() > 0:
                      print("EMAIL VERIFICATION REQUIRED")
-                     if not verification_callback:
-                         return {"status": "error", "message": "Email verification required but no callback provided."}
                      
-                     # Call callback to get code
+                     # If no callback, return status indicating verification needed
+                     # The caller (API route) will store the browser session
+                     if not verification_callback:
+                         return {
+                             "status": "verification_required",
+                             "message": "Email verification required. Call /verify endpoint with the code."
+                         }
+                     
+                     # If callback provided (e.g., manual/local testing), use it
                      code = await verification_callback()
                      if not code or len(code) != 8:
                          return {"status": "error", "message": "Invalid verification code provided."}
                      
-                     # Fill inputs
-                     print(f"Filling verification code: {code}")
-                     inputs = await page.locator(".email-verification__wrapper input").all()
-                     for idx, char in enumerate(code):
-                         if idx < len(inputs):
-                             await inputs[idx].fill(char)
-                             await page.wait_for_timeout(50)
-                     
-                     # Wait a moment
-                     await page.wait_for_timeout(500)
-
-                     # Click Verify/Submit button in modal
-                     verify_btn = page.locator(".email-verification button, #email-verification-submit, button:has-text('Verify'), button:has-text('Submit Code')").first
-                     if await verify_btn.count() > 0 and await verify_btn.is_visible():
-                         print("Clicking verify button...")
-                         await verify_btn.click()
-                     else:
-                         print("Verify button not found, assuming auto-submit or using main submit...")
-                         if submit_btn and await submit_btn.is_visible():
-                             print("Re-clicking main submit button...")
-                             await submit_btn.click()
-                             
-                     # Wait for post-verification submit check
-                     await page.wait_for_timeout(2000)
+                     # Fill the code and complete
+                     result = await self._complete_verification(page, code)
+                     return result
                 
                 # Check URL changes (confirmation page)
                 current_url = page.url
@@ -1520,6 +1521,61 @@ class GreenhouseApplier:
             
         except Exception as e:
             print(f"Error during submission check: {e}")
+            return {"status": "error", "message": str(e)}
+
+    async def _complete_verification(self, page: Page, code: str) -> dict[str, Any]:
+        """
+        Complete email verification with the provided code.
+        
+        Called either:
+        - Directly in _submit_form if callback is provided (local testing)
+        - From the /verify API endpoint with stored browser session
+        
+        Args:
+            page: The page with verification modal open  
+            code: The 8-digit verification code
+            
+        Returns:
+            Result dict with status and message
+        """
+        try:
+            print(f"Filling verification code: {code}")
+            inputs = await page.locator(".email-verification__wrapper input").all()
+            
+            for idx, char in enumerate(code):
+                if idx < len(inputs):
+                    await inputs[idx].fill(char)
+                    await page.wait_for_timeout(50)
+            
+            await page.wait_for_timeout(500)
+
+            # Click Verify/Submit button in modal
+            verify_btn = page.locator(".email-verification button, #email-verification-submit, button:has-text('Verify'), button:has-text('Submit Code')").first
+            if await verify_btn.count() > 0 and await verify_btn.is_visible():
+                print("Clicking verify button...")
+                await verify_btn.click()
+            else:
+                # Try main submit button
+                submit_btn = await page.query_selector("#submit_app, input[type='submit'], button[type='submit']")
+                if submit_btn:
+                    print("Clicking main submit button...")
+                    await submit_btn.click()
+            
+            # Wait for confirmation
+            for _ in range(30):  # 30 seconds
+                if await page.locator("#application_confirmation").count() > 0:
+                    return {"status": "success", "message": "Application submitted successfully."}
+                
+                current_url = page.url
+                if "thank" in current_url.lower() or "confirm" in current_url.lower():
+                    return {"status": "success", "message": "Application submitted (confirmation page detected)."}
+                
+                await page.wait_for_timeout(1000)
+            
+            return {"status": "unknown", "message": "Verification code submitted but confirmation not detected."}
+            
+        except Exception as e:
+            print(f"Error during verification completion: {e}")
             return {"status": "error", "message": str(e)}
 
     # Legacy method for backwards compatibility

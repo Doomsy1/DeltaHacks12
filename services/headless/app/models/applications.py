@@ -12,6 +12,7 @@ class ApplicationState(str, Enum):
     ANALYZING = "analyzing"
     PENDING_REVIEW = "pending_review"
     SUBMITTING = "submitting"
+    PENDING_VERIFICATION = "pending_verification"
     SUBMITTED = "submitted"
     FAILED = "failed"
     EXPIRED = "expired"
@@ -50,6 +51,21 @@ class SubmitRequest(BaseModel):
     field_overrides: dict[str, str] = Field(default_factory=dict)
     save_responses: bool = True
     idempotency_key: str | None = None
+
+
+class VerifyRequest(BaseModel):
+    """Request to provide email verification code."""
+    code: str = Field(..., min_length=8, max_length=8, description="8-digit verification code")
+
+
+class VerifyResponse(BaseModel):
+    """Response from verify endpoint."""
+    application_id: str
+    status: str
+    message: str
+    submitted_at: datetime | None = None
+    error: str | None = None
+    expires_in_seconds: int | None = None
 
 
 # --- Response Models ---

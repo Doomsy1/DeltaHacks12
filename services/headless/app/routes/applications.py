@@ -30,8 +30,11 @@ from app.models.applications import (
     JobInfo,
     SubmitRequest,
     SubmitResponse,
+    VerifyRequest,
+    VerifyResponse,
 )
 from app.applying.greenhouse import GreenhouseApplier, get_cache_key
+from app.browser_store import store_session, get_session, remove_session, get_session_info
 
 router = APIRouter(prefix="/api/v1/applications", tags=["applications"])
 
@@ -349,25 +352,19 @@ async def submit_application(
     fingerprint = app.get("form_fingerprint")
 
     # Fill and submit
-    # DEBUG: Set headless=False to see browser during testing
+    # Note: headless=True for production, but we need to keep browser alive for verification
     applier = GreenhouseApplier(headless=True)
 
-    # Define verification callback for server console interaction
-    async def server_verification_callback():
-        print("\n" + "!" * 50)
-        print(f"ACTION REQUIRED: Email Verification for Application {application_id}")
-        print("Please check your email and enter the 8-digit code below:")
-        print("!" * 50)
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, input, "Verification Code: ")
-
+    # We don't provide verification_callback - the applier will return
+    # verification_required status and we'll store the browser session
     try:
         result = await applier.fill_and_submit(
             url=job_url,
             fields=fields,
-            expected_fingerprint=None, # Disable strict check for demo robustness
+            expected_fingerprint=None,  # Disable strict check for demo robustness
             submit=True,
-            verification_callback=server_verification_callback
+            verification_callback=None,  # Don't use callback - handle via API
+            keep_browser_open=True  # Keep browser for potential verification
         )
     except Exception as e:
         await update_application(application_id, {
@@ -375,6 +372,29 @@ async def submit_application(
             "error": str(e)
         })
         raise HTTPException(status_code=502, detail=f"Failed to submit: {e}")
+
+    # Handle verification required
+    if result.get("status") == "verification_required":
+        # Store browser session for later
+        browser = result.get("browser")
+        page = result.get("page")
+        context = result.get("context")
+        
+        if browser and page and context:
+            store_session(application_id, page, browser, context)
+        
+        await update_application(application_id, {
+            "status": ApplicationState.PENDING_VERIFICATION.value,
+            "fields": fields
+        })
+        
+        session_info = get_session_info(application_id)
+        
+        return SubmitResponse(
+            application_id=application_id,
+            status="pending_verification",
+            message="Email verification required. Check your email for the 8-digit code and call POST /{application_id}/verify",
+        )
 
     # Handle form changed
     if result.get("status") == "form_changed":
@@ -417,6 +437,89 @@ async def submit_application(
             error=result.get("message")
         )
 
+
+@router.post("/{application_id}/verify")
+async def verify_application(
+    application_id: str,
+    request: VerifyRequest,
+    x_user_id: str | None = Header(None, alias="X-User-ID")
+) -> VerifyResponse:
+    """
+    Complete email verification for an application.
+    
+    This endpoint is called after submit returns status "pending_verification".
+    Provide the 8-digit code from the verification email.
+    """
+    user_id = _get_user_id(x_user_id)
+    
+    # Get application
+    app = await get_application(application_id)
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    
+    # Verify ownership
+    if app.get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Check state
+    if app.get("status") != ApplicationState.PENDING_VERIFICATION.value:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Application is not pending verification. Status: {app.get('status')}"
+        )
+    
+    # Get stored browser session
+    session = get_session(application_id)
+    if not session:
+        # Session expired or not found
+        await update_application(application_id, {
+            "status": ApplicationState.FAILED.value,
+            "error": "Verification session expired. Please submit again."
+        })
+        raise HTTPException(
+            status_code=410,
+            detail="Verification session expired. Please submit the application again."
+        )
+    
+    # Complete verification
+    applier = GreenhouseApplier(headless=True)
+    
+    try:
+        result = await applier._complete_verification(session.page, request.code)
+    except Exception as e:
+        await remove_session(application_id)
+        await update_application(application_id, {
+            "status": ApplicationState.FAILED.value,
+            "error": str(e)
+        })
+        raise HTTPException(status_code=502, detail=f"Verification failed: {e}")
+    finally:
+        # Always clean up the session after verification attempt
+        await remove_session(application_id)
+    
+    # Handle result
+    if result.get("status") == "success":
+        await update_application(application_id, {
+            "status": ApplicationState.SUBMITTED.value,
+            "submitted_at": datetime.utcnow()
+        })
+        return VerifyResponse(
+            application_id=application_id,
+            status="submitted",
+            message=result.get("message", "Application submitted successfully"),
+            submitted_at=datetime.utcnow()
+        )
+    else:
+        await update_application(application_id, {
+            "status": ApplicationState.FAILED.value,
+            "error": result.get("message", "Verification failed")
+        })
+        return VerifyResponse(
+            application_id=application_id,
+            status="failed",
+            message=result.get("message", "Verification failed"),
+            error=result.get("message")
+        )
 
 @router.get("/{application_id}")
 async def get_application_status(
