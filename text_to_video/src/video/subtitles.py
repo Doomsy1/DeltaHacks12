@@ -285,9 +285,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if estimated_chars > 0:
             max_width = VIDEO_WIDTH * 0.8
             calculated_font_size = int(max_width / (estimated_chars * 0.55))
-            title_font_size = max(80, min(calculated_font_size, TITLE_FONT_SIZE))
+            title_font_size = max(60, min(calculated_font_size, 50))
         else:
-            title_font_size = TITLE_FONT_SIZE
+            title_font_size = 50
         
         title_start = self._format_ass_time(0)
         title_end = self._format_ass_time(TITLE_DURATION)
