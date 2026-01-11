@@ -19,7 +19,7 @@ import sys
 from datetime import datetime
 
 # Configuration
-BASE_URL = "http://localhost:8001"
+BASE_URL = "http://155.138.132.178:8001"
 HEADERS = {"X-User-ID": "thomasariogpt@gmail.com"}
 TEST_JOB_ID = "4092512009"
 FAKE_APP_ID = "000000000000000000000000"

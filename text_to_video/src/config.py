@@ -8,6 +8,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
+# Config version - increment when changing video settings to invalidate cache
+CONFIG_VERSION = "v2"
 
 # Project paths
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -15,6 +17,14 @@ ASSETS_DIR = PROJECT_ROOT / "assets"
 CHARACTERS_DIR = ASSETS_DIR / "characters"
 BACKGROUNDS_DIR = ASSETS_DIR / "backgrounds"
 CACHE_DIR = PROJECT_ROOT / "cache"
+
+# Debug: print paths on import (helps diagnose Docker path issues)
+print(f"[CONFIG] PROJECT_ROOT: {PROJECT_ROOT}")
+print(f"[CONFIG] ASSETS_DIR: {ASSETS_DIR} (exists: {ASSETS_DIR.exists()})")
+print(f"[CONFIG] BACKGROUNDS_DIR: {BACKGROUNDS_DIR} (exists: {BACKGROUNDS_DIR.exists()})")
+if BACKGROUNDS_DIR.exists():
+    bg_files = list(BACKGROUNDS_DIR.glob("*.mp4"))
+    print(f"[CONFIG] Found {len(bg_files)} background videos")
 
 # Ensure base cache directory exists
 CACHE_DIR.mkdir(parents=True, exist_ok=True)

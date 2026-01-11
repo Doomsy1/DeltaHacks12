@@ -27,13 +27,18 @@ class FFmpegCommandBuilder:
 
     def get_background_video(self, duration: float = 60.0) -> Path:
         """Find and randomly select a background video file, or generate a solid color background."""
+        print(f"[BACKGROUND] Searching in: {BACKGROUNDS_DIR}")
         video_files = list(BACKGROUNDS_DIR.glob("*.mp4")) + \
                      list(BACKGROUNDS_DIR.glob("*.mov")) + \
                      list(BACKGROUNDS_DIR.glob("*.avi"))
+        
+        print(f"[BACKGROUND] Found {len(video_files)} video files")
 
         if video_files:
             # Randomly select a background video
-            return random.choice(video_files)
+            selected = random.choice(video_files)
+            print(f"[BACKGROUND] Selected: {selected.name}")
+            return selected
         
         # No background video found - generate a solid color background
         print("No background video found, generating solid color background...")

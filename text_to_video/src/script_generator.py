@@ -10,6 +10,7 @@ from config import (
     DEFAULT_MODEL,
     get_topic_dirs,
     get_available_images,
+    CONFIG_VERSION,
 )
 from clients.gemini_client import GeminiClient
 from prompts.script_prompt_builder import ScriptPromptBuilder
@@ -100,9 +101,9 @@ class ScriptGenerator:
         
         print(f"Selected: {selected_group['name']} with template '{selected_template['name']}'")
         
-        # Create cache key that includes character group and template for uniqueness
-        # This way each combination has its own cache, but random selection means different combos each run
-        cache_key = f"{job_description}|{selected_group['name']}|{selected_template['name']}"
+        # Create cache key that includes character group, template, and CONFIG_VERSION for uniqueness
+        # CONFIG_VERSION ensures cache invalidates when video settings change
+        cache_key = f"{job_description}|{selected_group['name']}|{selected_template['name']}|{CONFIG_VERSION}"
         
         # Check cache only if force_regenerate is False
         # Note: Since we randomly select, you'll likely get different combos each time anyway

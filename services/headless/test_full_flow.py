@@ -21,7 +21,7 @@ import httpx
 from datetime import datetime, timezone
 
 # Configuration
-BASE_URL = "http://localhost:8001"
+BASE_URL = "http://155.138.132.178:8001"
 USER_ID = "thomasariogpt@gmail.com"
 TEST_JOB_ID = "4092512009"
 
