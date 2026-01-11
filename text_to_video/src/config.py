@@ -182,7 +182,7 @@ CAPTION_FONT_SIZE = 50  # Reduced from 110 for smaller captions
 CAPTION_FONT_FAMILY = "Nunito"
 CAPTION_FONT_WEIGHT = 900  # Black (400=normal, 700=bold, 900=black)
 CAPTION_POSITION = "center"  # Center horizontally, positioned above characters
-CAPTION_VERTICAL_POS = 850  # Pixels from top (above characters)
+CAPTION_VERTICAL_POS = 480  # Pixels from top (above characters)
 CAPTION_MAX_WIDTH_PERCENT = 0.80  # Maximum 80% of screen width
 CAPTION_STROKE_WIDTH = 3  # Reduced stroke width for smaller font
 CAPTION_STROKE_COLOR = "black"
