@@ -2,8 +2,11 @@ FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
 
 WORKDIR /app
 
+# Install uv for fast parallel dependency installation
+RUN pip install --no-cache-dir uv
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # Install Playwright browsers (chromium for headless automation)
 RUN playwright install chromium
