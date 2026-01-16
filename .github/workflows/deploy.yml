@@ -27,17 +27,23 @@ jobs:
           VULTR_HOST: ${{ secrets.VULTR_HOST }}
           VULTR_USER: ${{ secrets.VULTR_USER }}
           PROJECT_DIR: ${{ secrets.VULTR_PROJECT_DIR || 'DeltaHacks12' }}
-          run: |
-            ssh -o StrictHostKeyChecking=no ${VULTR_USER}@${VULTR_HOST} "
-              set -e
-              cd '$PROJECT_DIR' 2>/dev/null || cd /root/'$PROJECT_DIR' 2>/dev/null || cd /home/${VULTR_USER}/'$PROJECT_DIR' 2>/dev/null || { echo 'Project directory not found'; exit 1; }
-              ...
-            "
+      - name: Deploy to Vultr
+        env:
+          VULTR_HOST: ${{ secrets.VULTR_HOST }}
+          VULTR_USER: ${{ secrets.VULTR_USER }}
+          PROJECT_DIR: ${{ secrets.VULTR_PROJECT_DIR || 'DeltaHacks12' }}
+        run: |
+          ssh -o StrictHostKeyChecking=no ${VULTR_USER}@${VULTR_HOST} "
+            set -e
+            cd '$PROJECT_DIR' 2>/dev/null || cd /root/'$PROJECT_DIR' 2>/dev/null || cd /home/${VULTR_USER}/'$PROJECT_DIR' 2>/dev/null || { echo 'Project directory not found'; exit 1; }
+
             echo 'Pulling latest code...'
             git fetch origin
             git reset --hard origin/main 2>/dev/null || git reset --hard origin/master
+
             echo 'Ensuring Docker is running...'
             sudo systemctl start docker || true
+
             echo 'Building and deploying services...'
             docker compose -f docker-compose.prod.yml down --remove-orphans || true
             docker compose -f docker-compose.prod.yml build --no-cache
@@ -47,11 +53,11 @@ jobs:
             sleep 5
             echo 'Service status:'
             docker compose -f docker-compose.prod.yml ps
+
             echo 'Testing health endpoint...'
             sleep 2
             curl -f http://localhost:8000/health || echo 'Health check failed (services may still be starting)'
           "
-      
       - name: Cleanup SSH
         if: always()
         run: |
