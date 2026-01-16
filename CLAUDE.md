@@ -101,7 +101,7 @@ INTERNAL_API_KEY=...  # Shared secret for video uploads
 
 Object storage (DigitalOcean Spaces for video, Vultr for backend):
 ```
-DO_SPACES_CDN_URL=https://deltahacks-videos.tor1.cdn.digitaloceanspaces.com
+DO_SPACES_CDN_URL=https://deltahacksvideos.tor1.cdn.digitaloceanspaces.com
 VULTR_ENDPOINT=https://REGION.vultrobjects.com
 VULTR_ACCESS_KEY=...
 VULTR_SECRET_KEY=...

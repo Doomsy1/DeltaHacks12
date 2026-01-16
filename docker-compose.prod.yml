@@ -52,11 +52,11 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-}
       - MAX_FILE_SIZE=${MAX_FILE_SIZE:-524288000}
       # DigitalOcean Spaces CDN - direct public URLs, no presigning needed
-      - DO_SPACES_CDN_URL=${DO_SPACES_CDN_URL:-https://deltahacks-videos.tor1.cdn.digitaloceanspaces.com}
+      - DO_SPACES_CDN_URL=${DO_SPACES_CDN_URL:-https://deltahacksvideos.tor1.cdn.digitaloceanspaces.com}
       - DO_SPACES_ENDPOINT=${DO_SPACES_ENDPOINT:-https://tor1.digitaloceanspaces.com}
       - DO_SPACES_ACCESS_KEY=${DO_SPACES_ACCESS_KEY:-}
       - DO_SPACES_SECRET_KEY=${DO_SPACES_SECRET_KEY:-}
-      - DO_SPACES_BUCKET=${DO_SPACES_BUCKET:-deltahacks-videos}
+      - DO_SPACES_BUCKET=${DO_SPACES_BUCKET:-deltahacksvideos}
       - DO_SPACES_REGION=${DO_SPACES_REGION:-tor1}
     restart: unless-stopped
 
@@ -97,9 +97,9 @@ services:
       - DO_SPACES_ENDPOINT=${DO_SPACES_ENDPOINT:-https://tor1.digitaloceanspaces.com}
       - DO_SPACES_ACCESS_KEY=${DO_SPACES_ACCESS_KEY:-}
       - DO_SPACES_SECRET_KEY=${DO_SPACES_SECRET_KEY:-}
-      - DO_SPACES_BUCKET=${DO_SPACES_BUCKET:-deltahacks-videos}
+      - DO_SPACES_BUCKET=${DO_SPACES_BUCKET:-deltahacksvideos}
       - DO_SPACES_REGION=${DO_SPACES_REGION:-tor1}
-      - DO_SPACES_CDN_URL=${DO_SPACES_CDN_URL:-https://deltahacks-videos.tor1.cdn.digitaloceanspaces.com}
+      - DO_SPACES_CDN_URL=${DO_SPACES_CDN_URL:-https://deltahacksvideos.tor1.cdn.digitaloceanspaces.com}
       - WORKER_ID=generator-1
       - POLL_INTERVAL_S=5
       - MAX_RETRIES=3

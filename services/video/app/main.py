@@ -30,13 +30,13 @@ MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "524288000"))  # Default 500MB in
 
 # DigitalOcean Spaces CDN Configuration
 # CDN endpoint provides global edge caching for low-latency video delivery
-DO_SPACES_CDN_URL = os.getenv("DO_SPACES_CDN_URL", "https://deltahacks-videos.tor1.cdn.digitaloceanspaces.com")
+DO_SPACES_CDN_URL = os.getenv("DO_SPACES_CDN_URL", "https://deltahacksvideos.tor1.cdn.digitaloceanspaces.com")
 
 # DigitalOcean Spaces S3-compatible configuration (for uploads if needed)
 DO_SPACES_ENDPOINT = os.getenv("DO_SPACES_ENDPOINT", "https://tor1.digitaloceanspaces.com")
 DO_SPACES_ACCESS_KEY = os.getenv("DO_SPACES_ACCESS_KEY", "")
 DO_SPACES_SECRET_KEY = os.getenv("DO_SPACES_SECRET_KEY", "")
-DO_SPACES_BUCKET = os.getenv("DO_SPACES_BUCKET", "deltahacks-videos")
+DO_SPACES_BUCKET = os.getenv("DO_SPACES_BUCKET", "deltahacksvideos")
 DO_SPACES_REGION = os.getenv("DO_SPACES_REGION", "tor1")
 
 # MongoDB client

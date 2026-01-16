@@ -17,6 +17,7 @@ import {
 } from "react-native";
 
 import { VideoView, useVideoPlayer } from "expo-video";
+import type { VideoPlayerStatus } from "expo-video";
 import { Audio } from "expo-av";
 import { ReelOverlay } from "../../components/ReelOverlay";
 import { OTPInputModal } from "../../components/OTPInputModal";
@@ -146,6 +147,7 @@ async function fetchVideosFromSemanticSearch(
     const searchData = await searchResponse.json();
     const videoIds: string[] = searchData.greenhouse_ids || [];
     console.log(`✅ Found ${videoIds.length} video IDs (greenhouse_ids), fetching HLS URLs...`);
+    console.log(`📋 VIDEO IDS FROM BACKEND:`, JSON.stringify(videoIds));
 
     if (videoIds.length === 0) {
       console.log("No videos found from search");
@@ -191,7 +193,7 @@ async function fetchVideosFromSemanticSearch(
             return null;
           }
 
-          console.log(`     ✅ Got playback URL for ${videoId}`);
+          console.log(`     ✅ Got playback URL for ${videoId}: ${playbackUrl}`);
           return {
             videoUrl: playbackUrl,
             greenhouseId: videoId,
@@ -213,6 +215,10 @@ async function fetchVideosFromSemanticSearch(
     const validVideos = videoDataArray.filter((video) => video !== null) as VideoData[];
 
     console.log(`✅ Loaded ${validVideos.length} HLS URLs`);
+    console.log(`📺 FINAL VIDEO LIST:`);
+    validVideos.forEach((v, i) => {
+      console.log(`   [${i}] greenhouseId=${v.greenhouseId}, url=${v.videoUrl}`);
+    });
     return validVideos;
   } catch (error: any) {
     console.error("❌ Fatal error in fetchVideosFromSemanticSearch:");
@@ -252,12 +258,29 @@ const VideoWrapper = ({
 
   // Track if this video should be playing
   const shouldPlay = visibleIndex === index && !pauseOverride;
+  const [playerStatus, setPlayerStatus] = useState<VideoPlayerStatus>("idle");
 
   // Always create player with real URL - the player handles lazy loading internally
-  const player = useVideoPlayer(allVideos[index].videoUrl, (player) => {
+  const videoUrl = allVideos[index].videoUrl;
+  console.log(`🎬 [Video ${index}] Creating player with URL: ${videoUrl}`);
+  const player = useVideoPlayer(videoUrl, (player) => {
     player.loop = true;
     player.muted = false;
   });
+  useEffect(() => {
+    const subscription = player.addListener("statusChange", (payload) => {
+      setPlayerStatus(payload.status);
+      if (payload.status === "error") {
+        console.warn(`[Video ${index}] Player error:`, payload.error);
+      } else {
+        console.log(`[Video ${index}] Player status: ${payload.status}`);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [player, index]);
 
   // Generate random like/dislike counts on mount (different for each video)
   const [isLiked, setIsLiked] = useState(false);
@@ -373,6 +396,12 @@ const VideoWrapper = ({
     console.log(`[Video ${index}] Effect running: shouldPlay=${shouldPlay}, visibleIndex=${visibleIndex}, pauseOverride=${pauseOverride}`);
     
     if (shouldPlay) {
+      if (playerStatus !== "readyToPlay") {
+        console.log(
+          `[Video ${index}] Waiting for readyToPlay (status=${playerStatus})`
+        );
+        return;
+      }
       console.log(`[Video ${index}] Calling player.play()`);
       try {
         player.play();
@@ -594,6 +623,10 @@ export default function HomeScreen() {
         if (videos.length === 0) {
           setError("No videos found");
         } else {
+          console.log(`🎯 SETTING allVideos with ${videos.length} videos:`);
+          videos.forEach((v, i) => {
+            console.log(`   [${i}] ${v.greenhouseId} -> ${v.videoUrl}`);
+          });
           setAllVideos(videos);
         }
       } catch (err) {
