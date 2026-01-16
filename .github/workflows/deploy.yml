@@ -5,28 +5,23 @@ on:
     branches:
       - main
       - master
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.VULTR_HOST }} >> ~/.ssh/known_hosts
-      
-      - name: Deploy to Vultr
-        env:
-          VULTR_HOST: ${{ secrets.VULTR_HOST }}
-          VULTR_USER: ${{ secrets.VULTR_USER }}
-          PROJECT_DIR: ${{ secrets.VULTR_PROJECT_DIR || 'DeltaHacks12' }}
+
       - name: Deploy to Vultr
         env:
           VULTR_HOST: ${{ secrets.VULTR_HOST }}
@@ -58,6 +53,7 @@ jobs:
             sleep 2
             curl -f http://localhost:8000/health || echo 'Health check failed (services may still be starting)'
           "
+
       - name: Cleanup SSH
         if: always()
         run: |
